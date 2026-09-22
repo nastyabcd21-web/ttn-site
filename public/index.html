@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SalesDrive — обробка замовлень</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; background: #f5f6f8; color: #202124; }
+    header { background: #202124; color: white; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; }
+    header h1 { font-size: 18px; margin: 0; }
+    header .user-info { font-size: 13px; display: flex; gap: 12px; align-items: center; }
+    header button { background: #444; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; }
+
+    #loginScreen { max-width: 340px; margin: 80px auto; background: white; padding: 24px; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.15); }
+    #loginScreen h2 { margin-top: 0; font-size: 18px; }
+    #loginScreen input { width: 100%; padding: 8px; margin-top: 6px; margin-bottom: 12px; border: 1px solid #ccc; border-radius: 4px; }
+    #loginScreen button { width: 100%; padding: 10px; background: #1a73e8; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+    #loginError, #registerError { color: #c00; font-size: 13px; min-height: 16px; }
+
+    main { max-width: 1200px; margin: 20px auto; padding: 0 16px; }
+    .toolbar { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; align-items: center; }
+    .toolbar button, .toolbar select, .toolbar input { padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; font-size: 13px; }
+    .btn-primary { background: #1a73e8; color: white; border: none !important; }
+    .btn-secondary { background: #fff; }
+    .btn-danger { background: #d93025; color: white; border: none !important; }
+    #filterText { min-width: 220px; cursor: text; }
+    select#sortBy { margin-left: auto; }
+
+    table { width: 100%; border-collapse: collapse; background: white; border-radius: 6px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #eee; font-size: 13px; }
+    th { background: #f1f3f4; }
+    tr:hover { background: #fafafa; }
+    .checkbox-cell { width: 24px; }
+    .empty-hint { text-align: center; padding: 40px; color: #888; font-size: 14px; }
+  </style>
+</head>
+<body>
+
+  <div id="loginScreen">
+    <h2 id="authTitle">SalesDrive — вхід</h2>
+    <div id="loginForm">
+      <label>Логін</label>
+      <input type="text" id="loginInput">
+      <label>Пароль</label>
+      <input type="password" id="passwordInput">
+      <button onclick="doLogin()">Увійти</button>
+      <div id="loginError"></div>
+      <p style="text-align:center;font-size:13px;margin-top:14px;">
+        Немає акаунту? <a href="#" onclick="toggleAuthMode(); return false;">Зареєструватися</a>
+      </p>
+    </div>
+    <div id="registerForm" style="display:none;">
+      <label>Ім'я</label>
+      <input type="text" id="regNameInput">
+      <label>Логін</label>
+      <input type="text" id="regLoginInput">
+      <label>Пароль (мінімум 6 символів)</label>
+      <input type="password" id="regPasswordInput">
+      <button onclick="doRegister()">Зареєструватися</button>
+      <div id="registerError"></div>
+      <p style="text-align:center;font-size:13px;margin-top:14px;">
+        Вже є акаунт? <a href="#" onclick="toggleAuthMode(); return false;">Увійти</a>
+      </p>
+    </div>
+  </div>
+
+  <div id="app" style="display:none;">
+    <header>
+      <h1>SalesDrive — обробка замовлень</h1>
+      <div class="user-info">
+        <span id="userLabel"></span>
+        <button onclick="doLogout()">Вийти</button>
+      </div>
+    </header>
+    <main>
+      <div class="toolbar">
+        <button class="btn-primary" id="importBtn" onclick="importOrders()">⬇️ Завантажити зі SalesDrive</button>
+        <button class="btn-secondary" id="printTtnBtn" onclick="printSelectedTtn()">🖨️ Друкувати ТТН (вибрані)</button>
+        <select id="printFormat">
+          <option value="invoice">Формат: Накладна (А4/А5)</option>
+          <option value="label100">Формат: Наклейка 100х100</option>
+        </select>
+        <button class="btn-danger" id="finishBtn" onclick="finishSelected()">✅ Завершити вибрані (статус + видалити)</button>
+        <input type="text" id="filterText" placeholder="🔎 Пошук: клієнт, товар, ТТН…" oninput="renderOrders()">
+        <select id="filterCarrier" onchange="renderOrders()">
+          <option value="">Усі перевізники</option>
+          <option value="novaposhta">Нова пошта</option>
+          <option value="ukrposhta">Укрпошта</option>
+          <option value="rozetka_delivery">Rozetka Delivery</option>
+          <option value="meest">Meest</option>
+        </select>
+        <select id="sortBy" onchange="renderOrders()">
+          <option value="date">Порядок завантаження</option>
+          <option value="product">За товаром (А-Я)</option>
+          <option value="client">За клієнтом (А-Я)</option>
+          <option value="sum">За сумою (спадання)</option>
+        </select>
+      </div>
+      <table>
+        <thead><tr>
+          <th class="checkbox-cell"><input type="checkbox" id="selectAllCheckbox" onclick="toggleSelectAll()" title="Відмітити все"></th>
+          <th>Клієнт</th><th>Товари</th><th>Сума</th><th>ТТН</th><th>Служба доставки</th><th>Статус</th>
+        </tr></thead>
+        <tbody id="ordersBody"></tbody>
+      </table>
+      <div id="emptyHint" class="empty-hint" style="display:none;">Замовлень немає. Натисніть "Завантажити зі SalesDrive".</div>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

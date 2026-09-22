@@ -1,0 +1,24 @@
+# Render "Blueprint" — дозволяє створити сервіс одним кліком через render.com/deploy,
+# або Render сам підхопить цей файл, якщо він є в корені репозиторію GitHub.
+services:
+  - type: web
+    name: ttn-fulfillment-site
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: SALESDRIVE_DOMAIN
+        value: https://ekvator.salesdrive.me
+      - key: SALESDRIVE_FORM_API_KEY
+        sync: false
+      - key: SD_PULL_STATUS
+        value: "3"
+      - key: SD_DONE_STATUS
+        value: "11"
+      - key: NOVAPOSHTA_API_KEY
+        sync: false
