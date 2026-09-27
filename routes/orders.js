@@ -60,6 +60,59 @@ function randomDocNumber() {
   return String(Math.floor(100000000 + Math.random() * 900000000));
 }
 
+// --- Побудова тексту гарантійного талону блоками, з можливістю зменшити шрифт,
+// щоб гарантовано вмістити все на одну сторінку A4 (autofit). ---
+function buildWarrantyBlocks(scale) {
+  const s = (n) => Math.round(n * scale * 10) / 10;
+  const blocks = [];
+  blocks.push({ font: 'bold', size: s(14), text: 'Шановний покупець!', align: 'center', gap: s(6) });
+  blocks.push({ font: 'regular', size: s(8.5), text: WARRANTY_INTRO, align: 'left', gap: s(3) });
+  blocks.push({ font: 'regular', size: s(8.5), text: WARRANTY_INTRO2, align: 'left', gap: s(6) });
+  blocks.push({ font: 'bold', size: s(10), text: 'Інструкція з використання:', align: 'center', gap: s(3) });
+  WARRANTY_STEPS.forEach((step, idx) => {
+    blocks.push({ font: 'regular', size: s(8.5), text: `${idx + 1}. ${step}`, align: 'left', gap: s(2) });
+  });
+  blocks.push({ font: 'regular', size: s(8.5), text: WARRANTY_NOTE, align: 'left', gap: s(4) });
+  blocks.push({ font: 'bold', size: s(10), text: WARRANTY_SAFE, align: 'center', gap: s(6) });
+  blocks.push({ font: 'bold', size: s(11), text: 'Гарантійний талон', align: 'center', gap: s(4) });
+  blocks.push({ font: 'regular', size: s(8.5), text: WARRANTY_TERMS_INTRO, align: 'left', gap: s(2) });
+  WARRANTY_TERMS_LIST.forEach((line) => {
+    blocks.push({ font: 'regular', size: s(8.5), text: `•  ${line}`, align: 'left', gap: s(1) });
+  });
+  blocks.push({ font: 'regular', size: s(8.5), text: WARRANTY_REPAIR, align: 'left', gap: s(6) });
+  blocks.push({ font: 'bold', size: s(10), text: WARRANTY_KEEP, align: 'center', gap: s(6) });
+  blocks.push({ font: 'regular', size: s(8.5), text: WARRANTY_CONTACTS_INTRO, align: 'left', gap: s(3) });
+  blocks.push({ font: 'bold', size: s(10), text: WARRANTY_CONTACTS, align: 'center', gap: 0 });
+  return blocks;
+}
+
+function measureBlocks(doc, blocks, width) {
+  let total = 0;
+  for (const b of blocks) {
+    doc.font(b.font).fontSize(b.size);
+    total += doc.heightOfString(b.text, { width, align: b.align }) + b.gap;
+  }
+  return total;
+}
+
+function drawBlocks(doc, blocks, x, startY, width) {
+  let y = startY;
+  for (const b of blocks) {
+    doc.font(b.font).fontSize(b.size);
+    doc.text(b.text, x, y, { width, align: b.align });
+    y = doc.y + b.gap;
+  }
+  return y;
+}
+
+// --- Список товарів, для яких вручну позначено "друкувати гарантію" ---
+async function getProductWarrantyMap() {
+  const result = await pool.query('SELECT product_key, is_warranty FROM product_warranty');
+  const map = {};
+  for (const row of result.rows) map[row.product_key] = row.is_warranty;
+  return map;
+}
+
 const SD_DOMAIN = process.env.SALESDRIVE_DOMAIN || 'https://ekvator.salesdrive.me';
 const SD_FORM_API_KEY = process.env.SALESDRIVE_FORM_API_KEY;
 const PULL_STATUS = process.env.SD_PULL_STATUS || '3';   // "На відправку"
@@ -319,17 +372,58 @@ router.post('/finish', async (req, res) => {
   }
 });
 
+// ======================= СПИСОК ТОВАРІВ: НА ЯКІ ДРУКУВАТИ ГАРАНТІЮ =======================
+// Позначається один раз на товар; якщо в замовленні є хоч один такий товар —
+// для всього замовлення друкується повний "Гарантійний талон".
+
+router.get('/products', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT DISTINCT COALESCE(NULLIF(doc_name, ''), product_name) AS product_key
+       FROM orders
+       WHERE COALESCE(NULLIF(doc_name, ''), product_name) <> ''
+       ORDER BY product_key ASC`
+    );
+    const warrantyMap = await getProductWarrantyMap();
+    const products = result.rows.map((r) => ({ key: r.product_key, isWarranty: !!warrantyMap[r.product_key] }));
+    res.json({ products });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Помилка сервера при завантаженні списку товарів.' });
+  }
+});
+
+router.post('/products', async (req, res) => {
+  try {
+    const { items } = req.body;
+    if (!Array.isArray(items)) return res.status(400).json({ error: 'Некоректні дані.' });
+    for (const item of items) {
+      await pool.query(
+        `INSERT INTO product_warranty (product_key, is_warranty, updated_at)
+         VALUES ($1, $2, now())
+         ON CONFLICT (product_key) DO UPDATE SET is_warranty = EXCLUDED.is_warranty, updated_at = now()`,
+        [item.key, !!item.isWarranty]
+      );
+    }
+    res.json({ message: 'Збережено.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Помилка сервера при збереженні списку товарів.' });
+  }
+});
+
 // ======================= ГЕНЕРАЦІЯ ГАРАНТІЙНИХ ТАЛОНІВ / ЗАМОВЛЕНЬ (PDF) =======================
-// items: [{ sdId, isWarranty }] — у ТОМУ Ж порядку, що й вибрані/відсортовані замовлення на екрані.
-// isWarranty=true  -> повний "Гарантійний талон" з інструкцією
-// isWarranty=false -> сторінка "Замовлення" з рекламним блоком магазину
+// sdIds — у ТОМУ Ж порядку, що й вибрані/відсортовані замовлення на екрані.
+// Тип талону (гарантія чи замовлення) визначається АВТОМАТИЧНО за списком товарів вище.
 
 router.post('/print-warranty', async (req, res) => {
   try {
-    const { items } = req.body;
-    if (!Array.isArray(items) || !items.length) {
+    const { sdIds } = req.body;
+    if (!Array.isArray(sdIds) || !sdIds.length) {
       return res.status(400).json({ error: 'Виберіть хоча б одне замовлення.' });
     }
+
+    const warrantyMap = await getProductWarrantyMap();
 
     const doc = new PDFDocument({ size: 'A4', margin: 40, autoFirstPage: false });
     doc.registerFont('regular', FONT_REGULAR);
@@ -339,10 +433,7 @@ router.post('/print-warranty', async (req, res) => {
     doc.on('data', (chunk) => chunks.push(chunk));
     const donePromise = new Promise((resolve) => doc.on('end', resolve));
 
-    for (const item of items) {
-      const sdId = item.sdId;
-      const isWarranty = !!item.isWarranty;
-
+    for (const sdId of sdIds) {
       const result = await pool.query(
         'SELECT last_name, first_name, phone, ttn, product_name, doc_name, qty, price, created_at FROM orders WHERE sd_id = $1 ORDER BY id ASC',
         [sdId]
@@ -356,6 +447,9 @@ router.post('/print-warranty', async (req, res) => {
         totalQty += qty;
         return { name: r.doc_name || r.product_name || '', qty, price: Number(r.price) || 0 };
       });
+      // Якщо серед товарів замовлення є хоч один, позначений у списку як "гарантійний" —
+      // друкуємо повний гарантійний талон; інакше — сторінку "Замовлення".
+      const isWarranty = products.some((p) => warrantyMap[p.name] === true);
 
       doc.addPage();
       const pageWidth = doc.page.width;
@@ -407,44 +501,18 @@ router.post('/print-warranty', async (req, res) => {
       y += 20;
 
       if (isWarranty) {
-        doc.font('bold').fontSize(15).text('Шановний покупець!', marginLeft, y, { width: tableWidth, align: 'center' });
-        y = doc.y + 8;
-        doc.font('regular').fontSize(9).text(WARRANTY_INTRO, marginLeft, y, { width: tableWidth });
-        y = doc.y + 4;
-        doc.text(WARRANTY_INTRO2, marginLeft, y, { width: tableWidth });
-        y = doc.y + 8;
-
-        doc.font('bold').fontSize(11).text('Інструкція з використання:', marginLeft, y, { width: tableWidth, align: 'center' });
-        y = doc.y + 4;
-        doc.font('regular').fontSize(9);
-        WARRANTY_STEPS.forEach((step, idx) => {
-          doc.text(`${idx + 1}. ${step}`, marginLeft, y, { width: tableWidth });
-          y = doc.y + 3;
-        });
-
-        y += 2;
-        doc.text(WARRANTY_NOTE, marginLeft, y, { width: tableWidth });
-        y = doc.y + 6;
-        doc.font('bold').fontSize(11).text(WARRANTY_SAFE, marginLeft, y, { width: tableWidth, align: 'center' });
-        y = doc.y + 8;
-
-        doc.font('bold').fontSize(12).text('Гарантійний талон', marginLeft, y, { width: tableWidth, align: 'center' });
-        y = doc.y + 6;
-        doc.font('regular').fontSize(9).text(WARRANTY_TERMS_INTRO, marginLeft, y, { width: tableWidth });
-        y = doc.y + 3;
-        WARRANTY_TERMS_LIST.forEach((line) => {
-          doc.text(`•  ${line}`, marginLeft, y, { width: tableWidth });
-          y = doc.y + 2;
-        });
-        y += 3;
-        doc.text(WARRANTY_REPAIR, marginLeft, y, { width: tableWidth });
-        y = doc.y + 8;
-
-        doc.font('bold').fontSize(11).text(WARRANTY_KEEP, marginLeft, y, { width: tableWidth, align: 'center' });
-        y = doc.y + 8;
-        doc.font('regular').fontSize(9).text(WARRANTY_CONTACTS_INTRO, marginLeft, y, { width: tableWidth });
-        y = doc.y + 5;
-        doc.font('bold').fontSize(11).text(WARRANTY_CONTACTS, marginLeft, y, { width: tableWidth, align: 'center' });
+        // Автопідбір розміру шрифту, щоб увесь текст гарантійного талону
+        // гарантовано вмістився на залишок ЦІЄЇ сторінки (без переносу на другу).
+        const availableHeight = doc.page.height - doc.page.margins.bottom - y;
+        let scale = 1;
+        let blocks = buildWarrantyBlocks(scale);
+        let neededHeight = measureBlocks(doc, blocks, tableWidth);
+        while (neededHeight > availableHeight && scale > 0.5) {
+          scale = Math.round((scale - 0.05) * 100) / 100;
+          blocks = buildWarrantyBlocks(scale);
+          neededHeight = measureBlocks(doc, blocks, tableWidth);
+        }
+        drawBlocks(doc, blocks, marginLeft, y, tableWidth);
       } else {
         try {
           doc.image(ORDER_FOOTER_IMAGE, marginLeft, y, { width: tableWidth });
