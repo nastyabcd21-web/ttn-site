@@ -84,21 +84,6 @@ async function loadOrders() {
   }
 }
 
-async function debugOne() {
-  try {
-    const name = prompt('Прізвище замовлення, яке точно має заповнений "Дроп" (або залиште порожнім):', '');
-    const headers = {};
-    if (token) headers.Authorization = 'Bearer ' + token;
-    const url = '/api/orders/debug-one' + (name ? ('?name=' + encodeURIComponent(name)) : '');
-    const res = await fetch(url, { headers });
-    const text = await res.text();
-    const blob = new Blob([text], { type: 'text/plain; charset=utf-8' });
-    window.open(URL.createObjectURL(blob), '_blank');
-  } catch (err) {
-    alert('Помилка: ' + err.message);
-  }
-}
-
 async function importOrders() {
   const btn = document.getElementById('importBtn');
   btn.disabled = true; btn.textContent = 'Завантаження…';
