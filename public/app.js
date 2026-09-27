@@ -84,19 +84,6 @@ async function loadOrders() {
   }
 }
 
-async function debugRaw() {
-  try {
-    const headers = {};
-    if (token) headers.Authorization = 'Bearer ' + token;
-    const res = await fetch('/api/orders/debug-raw', { headers });
-    const text = await res.text();
-    const blob = new Blob([text], { type: 'text/plain' });
-    window.open(URL.createObjectURL(blob), '_blank');
-  } catch (err) {
-    alert('Помилка: ' + err.message);
-  }
-}
-
 async function importOrders() {
   const btn = document.getElementById('importBtn');
   btn.disabled = true; btn.textContent = 'Завантаження…';
