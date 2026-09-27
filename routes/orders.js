@@ -8,35 +8,6 @@ const assets = require('../assets');
 
 const router = express.Router();
 
-// ===== ТИМЧАСОВИЙ debug-маршрут для з'ясування реальних шляхів API Rozetka Delivery =====
-// (буде видалено після того, як розберемось з друком Rozetka)
-router.get('/debug-rozetka-paths', async (req, res) => {
-  try {
-    const base = process.env.ROZETKA_API_BASE || 'https://rz-delivery.rozetka.ua/api';
-    const url = base.replace(/\/api$/, '') + '/api/docs-json';
-    const response = await fetch(url);
-    const text = await response.text();
-    let spec;
-    try { spec = JSON.parse(text); } catch (e) {
-      return res.status(200).type('text/plain; charset=utf-8').send('Не JSON, статус ' + response.status + ':\n' + text.substring(0, 2000));
-    }
-    const pathKeys = Object.keys(spec.paths || {});
-    const labelPaths = pathKeys.filter((p) => p.toLowerCase().includes('label') || p.toLowerCase().includes('track'));
-    const schemas = {};
-    ['GetTrackLabelResponseDTO', 'GetTrackListResponseDTO', 'GetTrackResponseDTO'].forEach((s) => {
-      if (spec.components && spec.components.schemas && spec.components.schemas[s]) {
-        schemas[s] = spec.components.schemas[s];
-      }
-    });
-    res.status(200).type('text/plain; charset=utf-8').send(
-      'УСІ ШЛЯХИ (' + pathKeys.length + '):\n' + pathKeys.join('\n') +
-      '\n\n--- СХЕМИ (JSON) ---\n' + JSON.stringify(schemas, null, 2)
-    );
-  } catch (err) {
-    res.status(200).type('text/plain; charset=utf-8').send('Помилка: ' + err.message);
-  }
-});
-
 // ======================= ШРИФТИ ТА ТЕКСТИ ДЛЯ ГАРАНТІЙНИХ ТАЛОНІВ =======================
 // Шрифти (DejaVu Sans, підтримують кирилицю) та картинка зберігаються в assets.js
 // у вигляді тексту (base64), щоб їх можна було завантажити на GitHub як звичайний .js файл.
@@ -326,62 +297,45 @@ async function mergePdfBuffers(buffers) {
   return Buffer.from(await merged.save());
 }
 
-// Друк ТТН/етикетки Rozetka Delivery — на відміну від Нової пошти, тут немає
-// одного "масового" запиту: етикетка (PDF, у base64) забирається окремо для
-// кожної ТТН через GET /tracks/{ttn}/label, після чого всі сторінки об'єднуються в один файл.
-const ROZETKA_FETCH_TIMEOUT_MS = 12000;
+// Друк ТТН/етикетки Rozetka Delivery — правильний ендпоінт (з'ясовано через
+// службову діагностику їхньої Swagger-документації): GET /track/label?id=...&id=...
+// Приймає ОДРАЗУ список номерів ЕН одним запитом і повертає готовий PDF (base64) в data.label.
+const ROZETKA_FETCH_TIMEOUT_MS = 20000;
 
-async function fetchOneRozetkaLabel(ttn) {
+async function fetchRozetkaLabelsBulk(ttns) {
+  const params = new URLSearchParams();
+  ttns.forEach((t) => params.append('id', t));
+  const url = `${ROZETKA_API_BASE}/track/label?${params.toString()}`;
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), ROZETKA_FETCH_TIMEOUT_MS);
   try {
-    const response = await fetch(`${ROZETKA_API_BASE}/tracks/${encodeURIComponent(ttn)}/label`, {
+    const response = await fetch(url, {
       headers: {
         Authorization: `Bearer ${ROZETKA_API_TOKEN}`,
         'Content-Language': 'uk'
       },
       signal: controller.signal
     });
-    if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      return { ttn, ok: false, error: `HTTP ${response.status} — ${text.substring(0, 200)}` };
-    }
     const rawText = await response.text();
+    if (!response.ok) {
+      return { ok: false, error: `HTTP ${response.status} — ${rawText.substring(0, 300)}` };
+    }
     let body = null;
     try { body = JSON.parse(rawText); } catch (e) {
-      return { ttn, ok: false, error: `Відповідь не JSON — ${rawText.substring(0, 200)}` };
+      return { ok: false, error: `Відповідь не JSON — ${rawText.substring(0, 300)}` };
     }
     const labelBase64 = body && body.data && body.data.label;
     if (!labelBase64) {
-      return { ttn, ok: false, error: `Відповідь без поля data.label — ${JSON.stringify(body).substring(0, 200)}` };
+      return { ok: false, error: `Відповідь без поля data.label — ${JSON.stringify(body).substring(0, 300)}` };
     }
-    return { ttn, ok: true, buffer: Buffer.from(labelBase64, 'base64') };
+    return { ok: true, buffer: Buffer.from(labelBase64, 'base64') };
   } catch (e) {
     const reason = e.name === 'AbortError' ? `тайм-аут ${ROZETKA_FETCH_TIMEOUT_MS}мс` : e.message;
-    return { ttn, ok: false, error: reason };
+    return { ok: false, error: reason };
   } finally {
     clearTimeout(timeout);
   }
-}
-
-// Друк ТТН/етикетки Rozetka Delivery — на відміну від Нової пошти, тут немає
-// одного "масового" запиту: етикетка (PDF, у base64) забирається окремо для
-// кожної ТТН через GET /tracks/{ttn}/label (паралельно, з тайм-аутом на кожен запит),
-// після чого всі сторінки об'єднуються в один файл.
-async function fetchRozetkaLabels(ttns) {
-  const results = await Promise.all(ttns.map((ttn) => fetchOneRozetkaLabel(ttn)));
-  const buffers = [];
-  const failed = [];
-  const errorDetails = [];
-  for (const r of results) {
-    if (r.ok) {
-      buffers.push(r.buffer);
-    } else {
-      failed.push(r.ttn);
-      if (errorDetails.length < 3) errorDetails.push(`${r.ttn}: ${r.error}`);
-    }
-  }
-  return { buffers, failed, errorDetails };
 }
 
 router.post('/print-ttn', async (req, res) => {
@@ -438,13 +392,11 @@ router.post('/print-ttn', async (req, res) => {
     }
 
     let rozetkaBuffer = null;
-    let rozetkaFailed = [];
-    let rozetkaErrorDetails = [];
+    let rozetkaError = '';
     if (rozetkaTtns.length) {
-      const { buffers, failed, errorDetails } = await fetchRozetkaLabels(rozetkaTtns);
-      rozetkaFailed = failed;
-      rozetkaErrorDetails = errorDetails;
-      if (buffers.length) rozetkaBuffer = await mergePdfBuffers(buffers);
+      const result = await fetchRozetkaLabelsBulk(rozetkaTtns);
+      if (result.ok) rozetkaBuffer = result.buffer;
+      else rozetkaError = result.error;
     }
 
     let pdfBase64 = '';
@@ -460,11 +412,8 @@ router.post('/print-ttn', async (req, res) => {
     if (manualCarrierOrders.length) {
       messages.push('Ці замовлення потрібно роздрукувати вручну в кабінеті перевізника: ' + manualCarrierOrders.join(', '));
     }
-    if (rozetkaFailed.length) {
-      if (rozetkaErrorDetails.length) {
-        messages.push('ПРИЧИНА ПОМИЛКИ Rozetka Delivery: ' + rozetkaErrorDetails.join(' || '));
-      }
-      messages.push(`Не вдалося отримати етикетку Rozetka Delivery для ${rozetkaFailed.length} ТТН (перші: ${rozetkaFailed.slice(0, 3).join(', ')}).`);
+    if (rozetkaError) {
+      messages.push(`ПОМИЛКА Rozetka Delivery (${rozetkaTtns.length} ТТН): ` + rozetkaError);
     }
 
     res.json({ pdfBase64, manualMessage: messages.join(' ') });
