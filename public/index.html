@@ -81,6 +81,7 @@
           <option value="invoice">Формат: Накладна (А4/А5)</option>
           <option value="label100">Формат: Наклейка 100х100</option>
         </select>
+        <button class="btn-secondary" id="printWarrantyBtn" onclick="printWarranty()">🎫 Друкувати талони (вибрані)</button>
         <button class="btn-danger" id="finishBtn" onclick="finishSelected()">✅ Завершити вибрані (статус + видалити)</button>
         <input type="text" id="filterText" placeholder="🔎 Пошук: клієнт, товар, ТТН…" oninput="renderOrders()">
         <select id="filterCarrier" onchange="renderOrders()">
@@ -100,7 +101,7 @@
       <table>
         <thead><tr>
           <th class="checkbox-cell"><input type="checkbox" id="selectAllCheckbox" onclick="toggleSelectAll()" title="Відмітити все"></th>
-          <th>Клієнт</th><th>Товари</th><th>Сума</th><th>ТТН</th><th>Служба доставки</th><th>Статус</th>
+          <th>Клієнт</th><th>Товари</th><th>Сума</th><th>ТТН</th><th>Служба доставки</th><th>Статус</th><th title="Позначте, де друкувати повний гарантійний талон замість сторінки замовлення">Гарантія</th>
         </tr></thead>
         <tbody id="ordersBody"></tbody>
       </table>
