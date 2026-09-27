@@ -16,27 +16,59 @@ const CARRIER_LABELS = { novaposhta: 'Нова пошта', ukrposhta: 'Укрп
 
 router.use(authMiddleware);
 
+// ======================= ТИМЧАСОВИЙ DEBUG: СИРІ ДАНІ ОДНОГО ЗАМОВЛЕННЯ =======================
+// Використовується один раз, щоб знайти технічну назву поля "Дроп" у відповіді SalesDrive.
+// Можна видалити цей роут пізніше.
+
+router.get('/debug-raw', async (req, res) => {
+  try {
+    if (!SD_FORM_API_KEY) return res.status(500).json({ error: 'Не встановлено SALESDRIVE_FORM_API_KEY на сервері.' });
+    const params = new URLSearchParams({ page: '1', limit: '3', 'filter[statusId]': PULL_STATUS });
+    const response = await fetch(`${SD_DOMAIN}/api/order/list/?${params.toString()}`, {
+      method: 'GET',
+      headers: { 'Form-Api-Key': SD_FORM_API_KEY }
+    });
+    const rawText = await response.text();
+    if (!response.ok) return res.status(502).send(rawText);
+    res.type('json').send(rawText);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ======================= ІМПОРТ ЗАМОВЛЕНЬ ЗІ SALESDRIVE =======================
 
 router.post('/import', async (req, res) => {
   try {
     if (!SD_FORM_API_KEY) return res.status(500).json({ error: 'Не встановлено SALESDRIVE_FORM_API_KEY на сервері.' });
 
-    const params = new URLSearchParams({ page: '1', limit: '200', 'filter[statusId]': PULL_STATUS });
-    const response = await fetch(`${SD_DOMAIN}/api/order/list/?${params.toString()}`, {
-      method: 'GET',
-      headers: { 'Form-Api-Key': SD_FORM_API_KEY }
-    });
-    const rawText = await response.text();
-    if (!response.ok) return res.status(502).json({ error: `Помилка SalesDrive API: ${rawText.substring(0, 500)}` });
+    // SalesDrive повертає результати сторінками — тягнемо всі сторінки,
+    // поки не отримаємо порожню/неповну сторінку (тобто дійшли до кінця).
+    const PAGE_LIMIT = 200;
+    let page = 1;
+    let sdOrders = [];
+    while (true) {
+      const params = new URLSearchParams({ page: String(page), limit: String(PAGE_LIMIT), 'filter[statusId]': PULL_STATUS });
+      const response = await fetch(`${SD_DOMAIN}/api/order/list/?${params.toString()}`, {
+        method: 'GET',
+        headers: { 'Form-Api-Key': SD_FORM_API_KEY }
+      });
+      const rawText = await response.text();
+      if (!response.ok) return res.status(502).json({ error: `Помилка SalesDrive API: ${rawText.substring(0, 500)}` });
 
-    let body;
-    try { body = JSON.parse(rawText); } catch (e) {
-      return res.status(502).json({ error: `SalesDrive повернув не-JSON: ${rawText.substring(0, 300)}` });
-    }
-    const sdOrders = body.data || body.orders || (Array.isArray(body) ? body : []);
-    if (!Array.isArray(sdOrders)) {
-      return res.status(502).json({ error: `Не знайдено масив замовлень. Ключі: ${Object.keys(body || {}).join(', ')}` });
+      let body;
+      try { body = JSON.parse(rawText); } catch (e) {
+        return res.status(502).json({ error: `SalesDrive повернув не-JSON: ${rawText.substring(0, 300)}` });
+      }
+      const pageOrders = body.data || body.orders || (Array.isArray(body) ? body : []);
+      if (!Array.isArray(pageOrders)) {
+        return res.status(502).json({ error: `Не знайдено масив замовлень. Ключі: ${Object.keys(body || {}).join(', ')}` });
+      }
+
+      sdOrders = sdOrders.concat(pageOrders);
+      if (pageOrders.length < PAGE_LIMIT) break; // остання сторінка
+      page++;
+      if (page > 100) break; // запобіжник від нескінченного циклу
     }
 
     let addedRows = 0;
@@ -55,7 +87,7 @@ router.post('/import', async (req, res) => {
         addedRows++;
       }
     }
-    res.json({ message: `Завантажено замовлень: ${sdOrders.length} (нових рядків товарів: ${addedRows}).` });
+    res.json({ message: `Завантажено замовлень зі SalesDrive: ${sdOrders.length} (сторінок: ${page}, нових рядків товарів: ${addedRows}).` });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Помилка сервера при імпорті: ' + err.message });
