@@ -432,10 +432,10 @@ router.post('/print-ttn', async (req, res) => {
       messages.push('Ці замовлення потрібно роздрукувати вручну в кабінеті перевізника: ' + manualCarrierOrders.join(', '));
     }
     if (rozetkaFailed.length) {
-      messages.push('Не вдалося отримати етикетку Rozetka Delivery для ТТН: ' + rozetkaFailed.join(', '));
       if (rozetkaErrorDetails.length) {
-        messages.push('Деталі помилки (перші приклади): ' + rozetkaErrorDetails.join(' | '));
+        messages.push('ПРИЧИНА ПОМИЛКИ Rozetka Delivery: ' + rozetkaErrorDetails.join(' || '));
       }
+      messages.push(`Не вдалося отримати етикетку Rozetka Delivery для ${rozetkaFailed.length} ТТН (перші: ${rozetkaFailed.slice(0, 3).join(', ')}).`);
     }
 
     res.json({ pdfBase64, manualMessage: messages.join(' ') });
