@@ -377,12 +377,18 @@ router.post('/print-ttn', async (req, res) => {
     for (const sdId of sdIds) {
       const row = rowsBySdId[sdId];
       if (!row) continue;
-      if (AUTO_PRINT_CARRIERS.indexOf(row.carrier) === -1) {
-        manualCarrierOrders.push(`${row.sd_id} (${CARRIER_LABELS[row.carrier] || row.carrier || 'невідомий перевізник'})`);
-      } else if (row.ttn && row.carrier === 'novaposhta') {
-        npTtns.push(String(row.ttn).trim());
-      } else if (row.ttn && row.carrier === 'rozetkaDelivery') {
-        rozetkaTtns.push(String(row.ttn).trim());
+      const ttnTrimmed = row.ttn ? String(row.ttn).trim() : '';
+      // ТТН з префіксом "PRM-" — це замовлення, створені на сайті Prom.ua
+      // (інший обліковий запис у Rozetka Delivery), наш токен їх не бачить —
+      // такі завжди йдуть у список "друкувати вручну".
+      const isPromOrder = /^PRM-/i.test(ttnTrimmed);
+      if (AUTO_PRINT_CARRIERS.indexOf(row.carrier) === -1 || (row.carrier === 'rozetkaDelivery' && isPromOrder)) {
+        const label = isPromOrder ? 'Rozetka Delivery через Prom.ua' : (CARRIER_LABELS[row.carrier] || row.carrier || 'невідомий перевізник');
+        manualCarrierOrders.push(`${row.sd_id} (${label})`);
+      } else if (ttnTrimmed && row.carrier === 'novaposhta') {
+        npTtns.push(ttnTrimmed);
+      } else if (ttnTrimmed && row.carrier === 'rozetkaDelivery') {
+        rozetkaTtns.push(ttnTrimmed);
       }
     }
 
