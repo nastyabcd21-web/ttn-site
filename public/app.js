@@ -104,7 +104,7 @@ function sortedOrders() {
   const filterCarrier = document.getElementById('filterCarrier').value;
 
   let list = orders.slice();
-  if (filterCarrier) list = list.filter((o) => o.carrier === filterCarrier);
+  if (filterCarrier) list = list.filter((o) => (o.carrierKey || o.carrier) === filterCarrier);
   if (filterText) {
     list = list.filter((o) => {
       const clientStr = ((o.lastName || '') + ' ' + (o.firstName || '')).toLowerCase();
