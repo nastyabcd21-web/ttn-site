@@ -303,6 +303,7 @@ async function mergePdfBuffers(buffers) {
 async function fetchRozetkaLabels(ttns) {
   const buffers = [];
   const failed = [];
+  const errorDetails = [];
   for (const ttn of ttns) {
     try {
       const response = await fetch(`${ROZETKA_API_BASE}/tracks/${encodeURIComponent(ttn)}/label`, {
@@ -313,20 +314,28 @@ async function fetchRozetkaLabels(ttns) {
       });
       if (!response.ok) {
         failed.push(ttn);
+        if (errorDetails.length < 3) {
+          const text = await response.text().catch(() => '');
+          errorDetails.push(`${ttn}: HTTP ${response.status} — ${text.substring(0, 200)}`);
+        }
         continue;
       }
       const body = await response.json().catch(() => null);
       const labelBase64 = body && body.data && body.data.label;
       if (!labelBase64) {
         failed.push(ttn);
+        if (errorDetails.length < 3) {
+          errorDetails.push(`${ttn}: відповідь без поля data.label — ${JSON.stringify(body).substring(0, 200)}`);
+        }
         continue;
       }
       buffers.push(Buffer.from(labelBase64, 'base64'));
     } catch (e) {
       failed.push(ttn);
+      if (errorDetails.length < 3) errorDetails.push(`${ttn}: ${e.message}`);
     }
   }
-  return { buffers, failed };
+  return { buffers, failed, errorDetails };
 }
 
 router.post('/print-ttn', async (req, res) => {
@@ -384,9 +393,11 @@ router.post('/print-ttn', async (req, res) => {
 
     let rozetkaBuffer = null;
     let rozetkaFailed = [];
+    let rozetkaErrorDetails = [];
     if (rozetkaTtns.length) {
-      const { buffers, failed } = await fetchRozetkaLabels(rozetkaTtns);
+      const { buffers, failed, errorDetails } = await fetchRozetkaLabels(rozetkaTtns);
       rozetkaFailed = failed;
+      rozetkaErrorDetails = errorDetails;
       if (buffers.length) rozetkaBuffer = await mergePdfBuffers(buffers);
     }
 
@@ -405,6 +416,9 @@ router.post('/print-ttn', async (req, res) => {
     }
     if (rozetkaFailed.length) {
       messages.push('Не вдалося отримати етикетку Rozetka Delivery для ТТН: ' + rozetkaFailed.join(', '));
+      if (rozetkaErrorDetails.length) {
+        messages.push('Деталі помилки (перші приклади): ' + rozetkaErrorDetails.join(' | '));
+      }
     }
 
     res.json({ pdfBase64, manualMessage: messages.join(' ') });
