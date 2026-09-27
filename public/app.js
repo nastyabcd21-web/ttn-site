@@ -148,7 +148,6 @@ function renderOrders() {
     html += '<td>' + (o.ttn || '—') + '</td>';
     html += '<td>' + (o.carrierLabel || '—') + '</td>';
     html += '<td>' + statusLabel + '</td>';
-    html += '<td class="checkbox-cell"><input type="checkbox" class="warranty-check" data-id="' + o.sdId + '"></td>';
     tr.innerHTML = html;
     body.appendChild(tr);
   });
@@ -185,14 +184,10 @@ async function printSelectedTtn() {
 async function printWarranty() {
   const ids = getSelectedIds(); // у тому ж порядку, що й на екрані/у ТТН
   if (!ids.length) { alert('Виберіть хоча б одне замовлення.'); return; }
-  const items = ids.map((id) => {
-    const cb = document.querySelector('.warranty-check[data-id="' + id + '"]');
-    return { sdId: id, isWarranty: !!(cb && cb.checked) };
-  });
   const btn = document.getElementById('printWarrantyBtn');
   btn.disabled = true; btn.textContent = 'Готуємо PDF…';
   try {
-    const res = await api('/orders/print-warranty', { method: 'POST', body: JSON.stringify({ items }) });
+    const res = await api('/orders/print-warranty', { method: 'POST', body: JSON.stringify({ sdIds: ids }) });
     if (res.pdfBase64) {
       const byteChars = atob(res.pdfBase64);
       const byteNumbers = new Array(byteChars.length);
@@ -205,6 +200,49 @@ async function printWarranty() {
     alert('Помилка: ' + err.message);
   } finally {
     btn.disabled = false; btn.textContent = '🎫 Друкувати талони (вибрані)';
+  }
+}
+
+async function openWarrantyModal() {
+  document.getElementById('warrantyModalOverlay').classList.add('active');
+  const listEl = document.getElementById('warrantyProductList');
+  listEl.textContent = 'Завантаження…';
+  try {
+    const res = await api('/orders/products');
+    const products = res.products || [];
+    if (!products.length) {
+      listEl.innerHTML = '<p style="color:#888;">Товарів поки немає — спочатку завантажте замовлення.</p>';
+      return;
+    }
+    listEl.innerHTML = products.map((p, idx) => (
+      '<label class="product-row-item">' +
+        '<input type="checkbox" class="product-warranty-check" data-key="' + idx + '" ' + (p.isWarranty ? 'checked' : '') + '>' +
+        '<span>' + p.key + '</span>' +
+      '</label>'
+    )).join('');
+    listEl.dataset.productsJson = JSON.stringify(products.map((p) => p.key));
+  } catch (err) {
+    listEl.innerHTML = '<p style="color:#c00;">Помилка завантаження: ' + err.message + '</p>';
+  }
+}
+
+function closeWarrantyModal() {
+  document.getElementById('warrantyModalOverlay').classList.remove('active');
+}
+
+async function saveWarrantyProducts() {
+  const listEl = document.getElementById('warrantyProductList');
+  let keys = [];
+  try { keys = JSON.parse(listEl.dataset.productsJson || '[]'); } catch (e) { keys = []; }
+  const items = Array.from(document.querySelectorAll('.product-warranty-check')).map((cb) => ({
+    key: keys[Number(cb.dataset.key)],
+    isWarranty: cb.checked
+  }));
+  try {
+    await api('/orders/products', { method: 'POST', body: JSON.stringify({ items }) });
+    closeWarrantyModal();
+  } catch (err) {
+    alert('Помилка збереження: ' + err.message);
   }
 }
 
