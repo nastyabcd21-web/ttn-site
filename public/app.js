@@ -115,7 +115,20 @@ function sortedOrders() {
   }
 
   if (sortBy === 'product') {
-    list.sort((a, b) => ((a.products[0] && a.products[0].name) || '').localeCompare((b.products[0] && b.products[0].name) || '', 'uk'));
+    // Спочатку товари, на які найбільше замовлень (за спаданням кількості),
+    // а замовлення з однаковим товаром — групами, за алфавітом (для стабільності).
+    const counts = {};
+    list.forEach((o) => {
+      const key = (o.products[0] && o.products[0].name) || '';
+      counts[key] = (counts[key] || 0) + 1;
+    });
+    list.sort((a, b) => {
+      const keyA = (a.products[0] && a.products[0].name) || '';
+      const keyB = (b.products[0] && b.products[0].name) || '';
+      const diff = (counts[keyB] || 0) - (counts[keyA] || 0);
+      if (diff !== 0) return diff;
+      return keyA.localeCompare(keyB, 'uk');
+    });
   } else if (sortBy === 'client') {
     list.sort((a, b) => ((a.lastName || '') + ' ' + (a.firstName || '')).trim().localeCompare(((b.lastName || '') + ' ' + (b.firstName || '')).trim(), 'uk'));
   } else if (sortBy === 'sum') {
