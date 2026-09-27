@@ -22,9 +22,14 @@ router.get('/debug-rozetka-paths', async (req, res) => {
     }
     const pathKeys = Object.keys(spec.paths || {});
     const labelPaths = pathKeys.filter((p) => p.toLowerCase().includes('label') || p.toLowerCase().includes('track'));
+    const detail = {};
+    ['/api/track/label', '/api/track/{id}', '/api/track'].forEach((p) => {
+      if (spec.paths && spec.paths[p]) detail[p] = spec.paths[p];
+    });
     res.status(200).type('text/plain; charset=utf-8').send(
       'УСІ ШЛЯХИ (' + pathKeys.length + '):\n' + pathKeys.join('\n') +
-      '\n\n--- ШЛЯХИ З "track" АБО "label" ---\n' + labelPaths.join('\n')
+      '\n\n--- ШЛЯХИ З "track" АБО "label" ---\n' + labelPaths.join('\n') +
+      '\n\n--- ДЕТАЛІ (JSON) ---\n' + JSON.stringify(detail, null, 2)
     );
   } catch (err) {
     res.status(200).type('text/plain; charset=utf-8').send('Помилка: ' + err.message);
