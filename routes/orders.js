@@ -72,9 +72,18 @@ router.post('/import', async (req, res) => {
 
     let addedRows = 0;
     let skippedDrop = 0;
+    let removedDrop = 0;
     for (const sdOrder of sdOrders) {
-      // Пропускаємо замовлення, де поле "Дроп" НЕ пусте.
-      if (!isDropFieldEmpty(sdOrder)) { skippedDrop++; continue; }
+      const sdId = String(sdOrder.id || sdOrder.orderId);
+
+      // Якщо поле "Дроп" НЕ пусте — пропускаємо і, про всяк випадок,
+      // видаляємо це замовлення з бази, якщо воно туди потрапило раніше (до появи фільтра).
+      if (!isDropFieldEmpty(sdOrder)) {
+        skippedDrop++;
+        const del = await pool.query('DELETE FROM orders WHERE sd_id = $1', [sdId]);
+        if (del.rowCount) removedDrop++;
+        continue;
+      }
 
       const mapped = mapSalesDriveOrder(sdOrder);
       // Пропускаємо замовлення, які вже завантажені (щоб не дублювати при повторному імпорті)
@@ -90,7 +99,7 @@ router.post('/import', async (req, res) => {
         addedRows++;
       }
     }
-    res.json({ message: `Завантажено замовлень зі SalesDrive: ${sdOrders.length} (сторінок: ${page}, пропущено через поле "Дроп": ${skippedDrop}, нових рядків товарів: ${addedRows}).` });
+    res.json({ message: `Завантажено замовлень зі SalesDrive: ${sdOrders.length} (сторінок: ${page}, пропущено через поле "Дроп": ${skippedDrop}, з них видалено зі списку (були завантажені раніше): ${removedDrop}, нових рядків товарів: ${addedRows}).` });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Помилка сервера при імпорті: ' + err.message });
