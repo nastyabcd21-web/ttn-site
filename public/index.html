@@ -33,6 +33,15 @@
     tr:hover { background: #fafafa; }
     .checkbox-cell { width: 24px; }
     .empty-hint { text-align: center; padding: 40px; color: #888; font-size: 14px; }
+
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; }
+    .modal-overlay.active { display: flex; }
+    .modal-box { background: white; padding: 20px; border-radius: 8px; max-width: 520px; width: 92%; max-height: 82vh; overflow-y: auto; }
+    .modal-box h3 { margin-top: 0; }
+    .modal-box .hint { font-size: 12px; color: #666; margin-bottom: 12px; }
+    .product-row-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #eee; font-size: 13px; }
+    .product-row-item input { width: auto; }
+    .modal-actions { margin-top: 14px; display: flex; gap: 8px; justify-content: flex-end; }
   </style>
 </head>
 <body>
@@ -82,6 +91,7 @@
           <option value="label100">Формат: Наклейка 100х100</option>
         </select>
         <button class="btn-secondary" id="printWarrantyBtn" onclick="printWarranty()">🎫 Друкувати талони (вибрані)</button>
+        <button class="btn-secondary" onclick="openWarrantyModal()">⚙️ Гарантія по товарах</button>
         <button class="btn-danger" id="finishBtn" onclick="finishSelected()">✅ Завершити вибрані (статус + видалити)</button>
         <input type="text" id="filterText" placeholder="🔎 Пошук: клієнт, товар, ТТН…" oninput="renderOrders()">
         <select id="filterCarrier" onchange="renderOrders()">
@@ -101,12 +111,24 @@
       <table>
         <thead><tr>
           <th class="checkbox-cell"><input type="checkbox" id="selectAllCheckbox" onclick="toggleSelectAll()" title="Відмітити все"></th>
-          <th>Клієнт</th><th>Товари</th><th>Сума</th><th>ТТН</th><th>Служба доставки</th><th>Статус</th><th title="Позначте, де друкувати повний гарантійний талон замість сторінки замовлення">Гарантія</th>
+          <th>Клієнт</th><th>Товари</th><th>Сума</th><th>ТТН</th><th>Служба доставки</th><th>Статус</th>
         </tr></thead>
         <tbody id="ordersBody"></tbody>
       </table>
       <div id="emptyHint" class="empty-hint" style="display:none;">Замовлень немає. Натисніть "Завантажити зі SalesDrive".</div>
     </main>
+  </div>
+
+  <div class="modal-overlay" id="warrantyModalOverlay">
+    <div class="modal-box">
+      <h3>Гарантія по товарах</h3>
+      <p class="hint">Позначте товари, на які потрібно друкувати повний гарантійний талон. Якщо в замовленні є хоч один такий товар — для всього замовлення друкується гарантійний талон, інакше — сторінка "Замовлення".</p>
+      <div id="warrantyProductList">Завантаження…</div>
+      <div class="modal-actions">
+        <button class="btn-secondary" onclick="closeWarrantyModal()">Скасувати</button>
+        <button class="btn-primary" onclick="saveWarrantyProducts()">Зберегти</button>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>
