@@ -39,9 +39,10 @@ router.post('/import', async (req, res) => {
   try {
     if (!SD_FORM_API_KEY) return res.status(500).json({ error: 'Не встановлено SALESDRIVE_FORM_API_KEY на сервері.' });
 
-    // SalesDrive повертає результати сторінками — тягнемо всі сторінки,
-    // поки не отримаємо порожню/неповну сторінку (тобто дійшли до кінця).
-    const PAGE_LIMIT = 200;
+    // SalesDrive повертає результати сторінками і, схоже, ігнорує наш параметр limit
+    // (завжди віддає максимум ~100 на сторінку) — тому орієнтуємось не на розмір
+    // запитаного ліміту, а тягнемо сторінки, поки не отримаємо ПОРОЖНЮ сторінку.
+    const PAGE_LIMIT = 100;
     let page = 1;
     let sdOrders = [];
     while (true) {
@@ -62,10 +63,11 @@ router.post('/import', async (req, res) => {
         return res.status(502).json({ error: `Не знайдено масив замовлень. Ключі: ${Object.keys(body || {}).join(', ')}` });
       }
 
+      if (pageOrders.length === 0) break; // порожня сторінка — дійшли до кінця
+
       sdOrders = sdOrders.concat(pageOrders);
-      if (pageOrders.length < PAGE_LIMIT) break; // остання сторінка
       page++;
-      if (page > 100) break; // запобіжник від нескінченного циклу
+      if (page > 200) break; // запобіжник від нескінченного циклу
     }
 
     let addedRows = 0;
