@@ -8,23 +8,6 @@ const assets = require('../assets');
 
 const router = express.Router();
 
-// ===== ТИМЧАСОВИЙ debug-маршрут: як саме передавати статичний токен Rozetka =====
-router.get('/debug-rozetka-token', async (req, res) => {
-  try {
-    const base = process.env.ROZETKA_API_BASE || 'https://rz-delivery.rozetka.ua/api';
-    const response = await fetch(base + '/docs-json');
-    const spec = JSON.parse(await response.text());
-    const out = {};
-    ['/api/partner/static-token', '/api/partner/static-token/{id}', '/api/auth/login', '/api/auth/verify'].forEach((p) => {
-      if (spec.paths && spec.paths[p]) out[p] = spec.paths[p];
-    });
-    if (spec.components && spec.components.securitySchemes) out.securitySchemes = spec.components.securitySchemes;
-    res.status(200).type('text/plain; charset=utf-8').send(JSON.stringify(out, null, 2));
-  } catch (err) {
-    res.status(200).type('text/plain; charset=utf-8').send('Помилка: ' + err.message);
-  }
-});
-
 // ======================= ШРИФТИ ТА ТЕКСТИ ДЛЯ ГАРАНТІЙНИХ ТАЛОНІВ =======================
 // Шрифти (DejaVu Sans, підтримують кирилицю) та картинка зберігаються в assets.js
 // у вигляді тексту (base64), щоб їх можна було завантажити на GitHub як звичайний .js файл.
@@ -332,8 +315,17 @@ async function mergePdfBuffers(buffers) {
 
 // Друк ТТН/етикетки Rozetka Delivery — правильний ендпоінт (з'ясовано через
 // службову діагностику їхньої Swagger-документації): GET /track/label?id=...&id=...
-// Приймає ОДРАЗУ список номерів ЕН одним запитом і повертає готовий PDF (base64) в data.label.
+// Приймає список номерів ЕН одним запитом і повертає готовий PDF (base64) в data.label.
+// ОБМЕЖЕННЯ їхнього API: не більше 100 номерів "id" за один запит (arrayMaxSize: 100) —
+// тому великі партії розбиваємо на частини по 100 і об'єднуємо готові PDF в один.
 const ROZETKA_FETCH_TIMEOUT_MS = 20000;
+const ROZETKA_CHUNK_SIZE = 100;
+
+function chunkArray(arr, size) {
+  const chunks = [];
+  for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
+  return chunks;
+}
 
 async function fetchRozetkaLabelsBulk(ttns) {
   const params = new URLSearchParams();
@@ -433,9 +425,23 @@ router.post('/print-ttn', async (req, res) => {
     let rozetkaBuffer = null;
     let rozetkaError = '';
     if (rozetkaTtns.length) {
-      const result = await fetchRozetkaLabelsBulk(rozetkaTtns);
-      if (result.ok) rozetkaBuffer = result.buffer;
-      else rozetkaError = result.error;
+      const ttnChunks = chunkArray(rozetkaTtns, ROZETKA_CHUNK_SIZE);
+      const rozetkaBuffers = [];
+      const rozetkaErrors = [];
+      for (const chunk of ttnChunks) {
+        const result = await fetchRozetkaLabelsBulk(chunk);
+        if (result.ok) {
+          rozetkaBuffers.push(result.buffer);
+        } else {
+          rozetkaErrors.push(`ТТН ${chunk[0]}…${chunk[chunk.length - 1]} (${chunk.length} шт.): ${result.error}`);
+        }
+      }
+      if (rozetkaBuffers.length === 1) {
+        rozetkaBuffer = rozetkaBuffers[0];
+      } else if (rozetkaBuffers.length > 1) {
+        rozetkaBuffer = await mergePdfBuffers(rozetkaBuffers);
+      }
+      if (rozetkaErrors.length) rozetkaError = rozetkaErrors.join(' | ');
     }
 
     let pdfBase64 = '';
@@ -452,7 +458,7 @@ router.post('/print-ttn', async (req, res) => {
       messages.push('Ці замовлення потрібно роздрукувати вручну в кабінеті перевізника: ' + manualCarrierOrders.join(', '));
     }
     if (rozetkaError) {
-      messages.push(`ПОМИЛКА Rozetka Delivery (${rozetkaTtns.length} ТТН): ` + rozetkaError);
+      messages.push(`ПОМИЛКА Rozetka Delivery: ` + rozetkaError);
     }
 
     res.json({ pdfBase64, manualMessage: messages.join(' ') });
