@@ -8,6 +8,23 @@ const assets = require('../assets');
 
 const router = express.Router();
 
+// ===== ТИМЧАСОВИЙ debug-маршрут: як саме передавати статичний токен Rozetka =====
+router.get('/debug-rozetka-token', async (req, res) => {
+  try {
+    const base = process.env.ROZETKA_API_BASE || 'https://rz-delivery.rozetka.ua/api';
+    const response = await fetch(base + '/docs-json');
+    const spec = JSON.parse(await response.text());
+    const out = {};
+    ['/api/partner/static-token', '/api/partner/static-token/{id}', '/api/auth/login', '/api/auth/verify'].forEach((p) => {
+      if (spec.paths && spec.paths[p]) out[p] = spec.paths[p];
+    });
+    if (spec.components && spec.components.securitySchemes) out.securitySchemes = spec.components.securitySchemes;
+    res.status(200).type('text/plain; charset=utf-8').send(JSON.stringify(out, null, 2));
+  } catch (err) {
+    res.status(200).type('text/plain; charset=utf-8').send('Помилка: ' + err.message);
+  }
+});
+
 // ======================= ШРИФТИ ТА ТЕКСТИ ДЛЯ ГАРАНТІЙНИХ ТАЛОНІВ =======================
 // Шрифти (DejaVu Sans, підтримують кирилицю) та картинка зберігаються в assets.js
 // у вигляді тексту (base64), щоб їх можна було завантажити на GitHub як звичайний .js файл.
