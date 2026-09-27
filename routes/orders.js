@@ -300,39 +300,56 @@ async function mergePdfBuffers(buffers) {
 // Друк ТТН/етикетки Rozetka Delivery — на відміну від Нової пошти, тут немає
 // одного "масового" запиту: етикетка (PDF, у base64) забирається окремо для
 // кожної ТТН через GET /tracks/{ttn}/label, після чого всі сторінки об'єднуються в один файл.
+const ROZETKA_FETCH_TIMEOUT_MS = 12000;
+
+async function fetchOneRozetkaLabel(ttn) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), ROZETKA_FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${ROZETKA_API_BASE}/tracks/${encodeURIComponent(ttn)}/label`, {
+      headers: {
+        Authorization: `Bearer ${ROZETKA_API_TOKEN}`,
+        'Content-Language': 'uk'
+      },
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      return { ttn, ok: false, error: `HTTP ${response.status} — ${text.substring(0, 200)}` };
+    }
+    const rawText = await response.text();
+    let body = null;
+    try { body = JSON.parse(rawText); } catch (e) {
+      return { ttn, ok: false, error: `Відповідь не JSON — ${rawText.substring(0, 200)}` };
+    }
+    const labelBase64 = body && body.data && body.data.label;
+    if (!labelBase64) {
+      return { ttn, ok: false, error: `Відповідь без поля data.label — ${JSON.stringify(body).substring(0, 200)}` };
+    }
+    return { ttn, ok: true, buffer: Buffer.from(labelBase64, 'base64') };
+  } catch (e) {
+    const reason = e.name === 'AbortError' ? `тайм-аут ${ROZETKA_FETCH_TIMEOUT_MS}мс` : e.message;
+    return { ttn, ok: false, error: reason };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// Друк ТТН/етикетки Rozetka Delivery — на відміну від Нової пошти, тут немає
+// одного "масового" запиту: етикетка (PDF, у base64) забирається окремо для
+// кожної ТТН через GET /tracks/{ttn}/label (паралельно, з тайм-аутом на кожен запит),
+// після чого всі сторінки об'єднуються в один файл.
 async function fetchRozetkaLabels(ttns) {
+  const results = await Promise.all(ttns.map((ttn) => fetchOneRozetkaLabel(ttn)));
   const buffers = [];
   const failed = [];
   const errorDetails = [];
-  for (const ttn of ttns) {
-    try {
-      const response = await fetch(`${ROZETKA_API_BASE}/tracks/${encodeURIComponent(ttn)}/label`, {
-        headers: {
-          Authorization: `Bearer ${ROZETKA_API_TOKEN}`,
-          'Content-Language': 'uk'
-        }
-      });
-      if (!response.ok) {
-        failed.push(ttn);
-        if (errorDetails.length < 3) {
-          const text = await response.text().catch(() => '');
-          errorDetails.push(`${ttn}: HTTP ${response.status} — ${text.substring(0, 200)}`);
-        }
-        continue;
-      }
-      const body = await response.json().catch(() => null);
-      const labelBase64 = body && body.data && body.data.label;
-      if (!labelBase64) {
-        failed.push(ttn);
-        if (errorDetails.length < 3) {
-          errorDetails.push(`${ttn}: відповідь без поля data.label — ${JSON.stringify(body).substring(0, 200)}`);
-        }
-        continue;
-      }
-      buffers.push(Buffer.from(labelBase64, 'base64'));
-    } catch (e) {
-      failed.push(ttn);
-      if (errorDetails.length < 3) errorDetails.push(`${ttn}: ${e.message}`);
+  for (const r of results) {
+    if (r.ok) {
+      buffers.push(r.buffer);
+    } else {
+      failed.push(r.ttn);
+      if (errorDetails.length < 3) errorDetails.push(`${r.ttn}: ${r.error}`);
     }
   }
   return { buffers, failed, errorDetails };
