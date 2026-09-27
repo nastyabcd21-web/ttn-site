@@ -148,6 +148,7 @@ function renderOrders() {
     html += '<td>' + (o.ttn || '—') + '</td>';
     html += '<td>' + (o.carrierLabel || '—') + '</td>';
     html += '<td>' + statusLabel + '</td>';
+    html += '<td class="checkbox-cell"><input type="checkbox" class="warranty-check" data-id="' + o.sdId + '"></td>';
     tr.innerHTML = html;
     body.appendChild(tr);
   });
@@ -178,6 +179,32 @@ async function printSelectedTtn() {
     alert('Помилка: ' + err.message);
   } finally {
     btn.disabled = false; btn.textContent = '🖨️ Друкувати ТТН (вибрані)';
+  }
+}
+
+async function printWarranty() {
+  const ids = getSelectedIds(); // у тому ж порядку, що й на екрані/у ТТН
+  if (!ids.length) { alert('Виберіть хоча б одне замовлення.'); return; }
+  const items = ids.map((id) => {
+    const cb = document.querySelector('.warranty-check[data-id="' + id + '"]');
+    return { sdId: id, isWarranty: !!(cb && cb.checked) };
+  });
+  const btn = document.getElementById('printWarrantyBtn');
+  btn.disabled = true; btn.textContent = 'Готуємо PDF…';
+  try {
+    const res = await api('/orders/print-warranty', { method: 'POST', body: JSON.stringify({ items }) });
+    if (res.pdfBase64) {
+      const byteChars = atob(res.pdfBase64);
+      const byteNumbers = new Array(byteChars.length);
+      for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
+      const blob = new Blob([new Uint8Array(byteNumbers)], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+    }
+  } catch (err) {
+    alert('Помилка: ' + err.message);
+  } finally {
+    btn.disabled = false; btn.textContent = '🎫 Друкувати талони (вибрані)';
   }
 }
 
