@@ -127,6 +127,17 @@ function sortedOrders() {
 function toggleSelectAll() {
   const checked = document.getElementById('selectAllCheckbox').checked;
   document.querySelectorAll('.order-check').forEach((el) => { el.checked = checked; });
+  updateOrderStats();
+}
+
+// Показує, скільки замовлень зараз у списку (з урахуванням фільтрів/пошуку)
+// і скільки з них відмічено галочкою.
+function updateOrderStats() {
+  const statsEl = document.getElementById('orderStats');
+  if (!statsEl) return;
+  const total = document.querySelectorAll('#ordersBody .order-check').length;
+  const selected = document.querySelectorAll('#ordersBody .order-check:checked').length;
+  statsEl.textContent = `Замовлень у списку: ${total}. Відмічено: ${selected}.`;
 }
 
 function renderOrders() {
@@ -151,6 +162,8 @@ function renderOrders() {
     tr.innerHTML = html;
     body.appendChild(tr);
   });
+
+  updateOrderStats();
 }
 
 function getSelectedIds() {
