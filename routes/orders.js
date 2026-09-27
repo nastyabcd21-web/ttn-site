@@ -122,8 +122,8 @@ const NOVAPOSHTA_API_KEY = process.env.NOVAPOSHTA_API_KEY;
 const ROZETKA_API_TOKEN = process.env.ROZETKA_API_TOKEN;
 const ROZETKA_API_BASE = process.env.ROZETKA_API_BASE || 'https://rz-delivery.rozetka.ua/api';
 
-const AUTO_PRINT_CARRIERS = ['novaposhta', 'rozetka_delivery'];
-const CARRIER_LABELS = { novaposhta: 'Нова пошта', ukrposhta: 'Укрпошта', rozetka_delivery: 'Rozetka Delivery', meest: 'Meest' };
+const AUTO_PRINT_CARRIERS = ['novaposhta', 'rozetkaDelivery'];
+const CARRIER_LABELS = { novaposhta: 'Нова пошта', ukrposhta: 'Укрпошта', rozetkaDelivery: 'Rozetka Delivery', meest: 'Meest' };
 
 router.use(authMiddleware);
 
@@ -355,7 +355,7 @@ router.post('/print-ttn', async (req, res) => {
         manualCarrierOrders.push(`${row.sd_id} (${CARRIER_LABELS[row.carrier] || row.carrier || 'невідомий перевізник'})`);
       } else if (row.ttn && row.carrier === 'novaposhta') {
         npTtns.push(String(row.ttn).trim());
-      } else if (row.ttn && row.carrier === 'rozetka_delivery') {
+      } else if (row.ttn && row.carrier === 'rozetkaDelivery') {
         rozetkaTtns.push(String(row.ttn).trim());
       }
     }
