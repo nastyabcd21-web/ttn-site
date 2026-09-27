@@ -1,6 +1,7 @@
 const express = require('express');
 const fetch = require('node-fetch');
 const PDFDocument = require('pdfkit');
+const { PDFDocument: PDFLibDocument } = require('pdf-lib');
 const pool = require('../db/pool');
 const { authMiddleware } = require('./auth');
 const assets = require('../assets');
@@ -118,8 +119,10 @@ const SD_FORM_API_KEY = process.env.SALESDRIVE_FORM_API_KEY;
 const PULL_STATUS = process.env.SD_PULL_STATUS || '3';   // "На відправку"
 const DONE_STATUS = process.env.SD_DONE_STATUS || '11';  // "Роздруковано"
 const NOVAPOSHTA_API_KEY = process.env.NOVAPOSHTA_API_KEY;
+const ROZETKA_API_TOKEN = process.env.ROZETKA_API_TOKEN;
+const ROZETKA_API_BASE = process.env.ROZETKA_API_BASE || 'https://rz-delivery.rozetka.ua/api';
 
-const AUTO_PRINT_CARRIERS = ['novaposhta'];
+const AUTO_PRINT_CARRIERS = ['novaposhta', 'rozetka_delivery'];
 const CARRIER_LABELS = { novaposhta: 'Нова пошта', ukrposhta: 'Укрпошта', rozetka_delivery: 'Rozetka Delivery', meest: 'Meest' };
 
 router.use(authMiddleware);
@@ -283,9 +286,51 @@ router.get('/', async (req, res) => {
 
 const NP_PRINT_METHODS = { invoice: 'printDocument', label100: 'printMarking100x100' };
 
+// Об'єднує кілька готових PDF-файлів (як Buffer/Uint8Array) в один, зберігаючи порядок.
+async function mergePdfBuffers(buffers) {
+  const merged = await PDFLibDocument.create();
+  for (const buf of buffers) {
+    const src = await PDFLibDocument.load(buf);
+    const pages = await merged.copyPages(src, src.getPageIndices());
+    pages.forEach((p) => merged.addPage(p));
+  }
+  return Buffer.from(await merged.save());
+}
+
+// Друк ТТН/етикетки Rozetka Delivery — на відміну від Нової пошти, тут немає
+// одного "масового" запиту: етикетка (PDF, у base64) забирається окремо для
+// кожної ТТН через GET /tracks/{ttn}/label, після чого всі сторінки об'єднуються в один файл.
+async function fetchRozetkaLabels(ttns) {
+  const buffers = [];
+  const failed = [];
+  for (const ttn of ttns) {
+    try {
+      const response = await fetch(`${ROZETKA_API_BASE}/tracks/${encodeURIComponent(ttn)}/label`, {
+        headers: {
+          Authorization: `Bearer ${ROZETKA_API_TOKEN}`,
+          'Content-Language': 'uk'
+        }
+      });
+      if (!response.ok) {
+        failed.push(ttn);
+        continue;
+      }
+      const body = await response.json().catch(() => null);
+      const labelBase64 = body && body.data && body.data.label;
+      if (!labelBase64) {
+        failed.push(ttn);
+        continue;
+      }
+      buffers.push(Buffer.from(labelBase64, 'base64'));
+    } catch (e) {
+      failed.push(ttn);
+    }
+  }
+  return { buffers, failed };
+}
+
 router.post('/print-ttn', async (req, res) => {
   try {
-    if (!NOVAPOSHTA_API_KEY) return res.status(500).json({ error: 'Не встановлено NOVAPOSHTA_API_KEY на сервері.' });
     const { sdIds, format } = req.body;
     if (!Array.isArray(sdIds) || !sdIds.length) return res.status(400).json({ error: 'Виберіть хоча б одне замовлення.' });
 
@@ -300,44 +345,69 @@ router.post('/print-ttn', async (req, res) => {
     const rowsBySdId = {};
     for (const row of result.rows) rowsBySdId[row.sd_id] = row;
 
-    const ttns = [];
+    const npTtns = [];
+    const rozetkaTtns = [];
     const manualCarrierOrders = [];
     for (const sdId of sdIds) {
       const row = rowsBySdId[sdId];
       if (!row) continue;
       if (AUTO_PRINT_CARRIERS.indexOf(row.carrier) === -1) {
         manualCarrierOrders.push(`${row.sd_id} (${CARRIER_LABELS[row.carrier] || row.carrier || 'невідомий перевізник'})`);
-      } else if (row.ttn) {
-        ttns.push(String(row.ttn).trim());
+      } else if (row.ttn && row.carrier === 'novaposhta') {
+        npTtns.push(String(row.ttn).trim());
+      } else if (row.ttn && row.carrier === 'rozetka_delivery') {
+        rozetkaTtns.push(String(row.ttn).trim());
       }
     }
 
-    if (!ttns.length && !manualCarrierOrders.length) {
+    if (!npTtns.length && !rozetkaTtns.length && !manualCarrierOrders.length) {
       return res.status(400).json({ error: 'У вибраних замовленнях немає номерів ТТН.' });
     }
 
-    let pdfBase64 = '';
-    if (ttns.length) {
+    if (npTtns.length && !NOVAPOSHTA_API_KEY) return res.status(500).json({ error: 'Не встановлено NOVAPOSHTA_API_KEY на сервері.' });
+    if (rozetkaTtns.length && !ROZETKA_API_TOKEN) return res.status(500).json({ error: 'Не встановлено ROZETKA_API_TOKEN на сервері.' });
+
+    let npBuffer = null;
+    if (npTtns.length) {
       const npMethod = NP_PRINT_METHODS[format] || NP_PRINT_METHODS.invoice;
       const fetchUrl = format === 'label100'
-        ? `https://my.novaposhta.ua/orders/printMarking100x100/orders/${ttns.join(',')}/type/pdf/zebra/zebra/apiKey/${NOVAPOSHTA_API_KEY}`
-        : `https://my.novaposhta.ua/orders/${npMethod}/orders/${ttns.join(',')}/type/pdf/apiKey/${NOVAPOSHTA_API_KEY}`;
+        ? `https://my.novaposhta.ua/orders/printMarking100x100/orders/${npTtns.join(',')}/type/pdf/zebra/zebra/apiKey/${NOVAPOSHTA_API_KEY}`
+        : `https://my.novaposhta.ua/orders/${npMethod}/orders/${npTtns.join(',')}/type/pdf/apiKey/${NOVAPOSHTA_API_KEY}`;
 
       const npResponse = await fetch(fetchUrl);
       if (!npResponse.ok) {
         const text = await npResponse.text();
         return res.status(502).json({ error: 'Помилка Нової пошти при друку ТТН: ' + text.substring(0, 300) });
       }
-      const buffer = await npResponse.buffer();
-      pdfBase64 = buffer.toString('base64');
+      npBuffer = await npResponse.buffer();
     }
 
-    res.json({
-      pdfBase64,
-      manualMessage: manualCarrierOrders.length
-        ? 'Ці замовлення потрібно роздрукувати вручну в кабінеті перевізника: ' + manualCarrierOrders.join(', ')
-        : ''
-    });
+    let rozetkaBuffer = null;
+    let rozetkaFailed = [];
+    if (rozetkaTtns.length) {
+      const { buffers, failed } = await fetchRozetkaLabels(rozetkaTtns);
+      rozetkaFailed = failed;
+      if (buffers.length) rozetkaBuffer = await mergePdfBuffers(buffers);
+    }
+
+    let pdfBase64 = '';
+    const partsToMerge = [npBuffer, rozetkaBuffer].filter(Boolean);
+    if (partsToMerge.length === 1) {
+      pdfBase64 = partsToMerge[0].toString('base64');
+    } else if (partsToMerge.length > 1) {
+      const finalBuffer = await mergePdfBuffers(partsToMerge);
+      pdfBase64 = finalBuffer.toString('base64');
+    }
+
+    const messages = [];
+    if (manualCarrierOrders.length) {
+      messages.push('Ці замовлення потрібно роздрукувати вручну в кабінеті перевізника: ' + manualCarrierOrders.join(', '));
+    }
+    if (rozetkaFailed.length) {
+      messages.push('Не вдалося отримати етикетку Rozetka Delivery для ТТН: ' + rozetkaFailed.join(', '));
+    }
+
+    res.json({ pdfBase64, manualMessage: messages.join(' ') });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Помилка сервера при друку ТТН: ' + err.message });
