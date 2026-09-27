@@ -140,7 +140,21 @@ const ROZETKA_API_TOKEN = process.env.ROZETKA_API_TOKEN;
 const ROZETKA_API_BASE = process.env.ROZETKA_API_BASE || 'https://rz-delivery.rozetka.ua/api';
 
 const AUTO_PRINT_CARRIERS = ['novaposhta', 'rozetkaDelivery'];
-const CARRIER_LABELS = { novaposhta: 'Нова пошта', ukrposhta: 'Укрпошта', rozetkaDelivery: 'Rozetka Delivery', meest: 'Meest' };
+const CARRIER_LABELS = {
+  novaposhta: 'Нова пошта',
+  ukrposhta: 'Укрпошта',
+  rozetkaDelivery: 'Rozetka Delivery',
+  rozetkaDeliveryProm: 'Rozetka Delivery (Пром)',
+  meest: 'Meest'
+};
+
+// ТТН з префіксом "PRM-" — замовлення, створені на сайті Prom.ua (інший обліковий
+// запис у Rozetka Delivery, недоступний нашим ключем API). Для відображення/фільтрації
+// в інтерфейсі трактуємо їх як окремого "перевізника" — carrierKey.
+function carrierKeyFor(carrier, ttn) {
+  if (carrier === 'rozetkaDelivery' && /^PRM-/i.test(String(ttn || '').trim())) return 'rozetkaDeliveryProm';
+  return carrier;
+}
 
 router.use(authMiddleware);
 
@@ -281,7 +295,9 @@ router.get('/', async (req, res) => {
       if (!groups[row.sd_id]) {
         groups[row.sd_id] = {
           sdId: row.sd_id, lastName: row.last_name, firstName: row.first_name,
-          ttn: row.ttn, carrier: row.carrier, carrierLabel: CARRIER_LABELS[row.carrier] || row.carrier || '—',
+          ttn: row.ttn, carrier: row.carrier,
+          carrierKey: carrierKeyFor(row.carrier, row.ttn),
+          carrierLabel: CARRIER_LABELS[carrierKeyFor(row.carrier, row.ttn)] || row.carrier || '—',
           status: row.status, sum: 0, products: []
         };
         order.push(row.sd_id);
