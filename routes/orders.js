@@ -8,6 +8,31 @@ const assets = require('../assets');
 
 const router = express.Router();
 
+// ===== ТИМЧАСОВИЙ debug-маршрут: шукаємо правильний API prom.ua для друку ТТН Rozetka Delivery через Prom =====
+router.get('/debug-prom-api', async (req, res) => {
+  const candidates = [
+    'https://my.prom.ua/api/v1/orders/list?limit=1',
+    'https://my.prom.ua/api/v1/orders/list',
+    'https://public-api.docs.prom.ua/openapi.json',
+    'https://public-api.docs.prom.ua/swagger.json',
+    'https://public-api.docs.prom.ua/api/openapi.json',
+    'https://prom.ua/cloud-cgi/static/uaprom-static/docs/swagger/index.html'
+  ];
+  const out = [];
+  const token = process.env.PROM_API_TOKEN || '';
+  for (const url of candidates) {
+    try {
+      const headers = url.indexOf('my.prom.ua') !== -1 && token ? { Authorization: `Bearer ${token}` } : {};
+      const response = await fetch(url, { headers });
+      const text = await response.text();
+      out.push(`===== ${url} =====\nHTTP ${response.status}\n${text.substring(0, 1500)}\n`);
+    } catch (e) {
+      out.push(`===== ${url} =====\nПОМИЛКА: ${e.message}\n`);
+    }
+  }
+  res.status(200).type('text/plain; charset=utf-8').send(out.join('\n'));
+});
+
 // ======================= ШРИФТИ ТА ТЕКСТИ ДЛЯ ГАРАНТІЙНИХ ТАЛОНІВ =======================
 // Шрифти (DejaVu Sans, підтримують кирилицю) та картинка зберігаються в assets.js
 // у вигляді тексту (base64), щоб їх можна було завантажити на GitHub як звичайний .js файл.
