@@ -38,3 +38,12 @@ CREATE TABLE IF NOT EXISTS warranty_config (
   months INTEGER NOT NULL,
   terms TEXT DEFAULT ''
 );
+
+-- Постійний список: для яких товарів друкувати повний "Гарантійний талон"
+-- замість сторінки "Замовлення". product_key = "Назва для документів" товару
+-- (або звичайна назва товару, якщо "Назва для документів" не заповнена).
+CREATE TABLE IF NOT EXISTS product_warranty (
+  product_key TEXT PRIMARY KEY,
+  is_warranty BOOLEAN NOT NULL DEFAULT false,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
