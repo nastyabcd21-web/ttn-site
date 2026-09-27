@@ -109,12 +109,13 @@
           <option value="sum">За сумою (спадання)</option>
         </select>
       </div>
+      <div id="orderStats" style="margin-bottom:10px;font-size:13px;color:#555;"></div>
       <table>
         <thead><tr>
           <th class="checkbox-cell"><input type="checkbox" id="selectAllCheckbox" onclick="toggleSelectAll()" title="Відмітити все"></th>
           <th>Клієнт</th><th>Товари</th><th>Сума</th><th>ТТН</th><th>Служба доставки</th><th>Статус</th>
         </tr></thead>
-        <tbody id="ordersBody"></tbody>
+        <tbody id="ordersBody" onchange="updateOrderStats()"></tbody>
       </table>
       <div id="emptyHint" class="empty-hint" style="display:none;">Замовлень немає. Натисніть "Завантажити зі SalesDrive".</div>
     </main>
@@ -132,6 +133,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=2"></script>
+  <script src="app.js?v=3"></script>
 </body>
 </html>
