@@ -1,9 +1,62 @@
 const express = require('express');
 const fetch = require('node-fetch');
+const path = require('path');
+const PDFDocument = require('pdfkit');
 const pool = require('../db/pool');
 const { authMiddleware } = require('./auth');
 
 const router = express.Router();
+
+// ======================= ШРИФТИ ТА ТЕКСТИ ДЛЯ ГАРАНТІЙНИХ ТАЛОНІВ =======================
+
+const FONT_REGULAR = path.join(__dirname, '..', 'DejaVuSans.ttf');
+const FONT_BOLD = path.join(__dirname, '..', 'DejaVuSans-Bold.ttf');
+const ORDER_FOOTER_IMAGE = path.join(__dirname, '..', 'order_footer.png');
+
+const WARRANTY_INTRO = 'Дякуємо, що обираєте наш магазин. У нас Ви можете придбати безліч товарів з підігрівом: Електропростирадла, електроковдри, електрогрілки різного розміру, устілки, шкарпетки з підігрівом, хімічні грілки (для ніг, рук та тіла), спальні мішки та одяг з підігрівом, і багато іншого. Щоб користуватись цим товаром із задоволенням, уважно прочитайте інструкцію.';
+const WARRANTY_INTRO2 = 'Дотримуйтесь правил користування, і ця техніка служитиме вам довго та надійно.';
+
+const WARRANTY_STEPS = [
+  'Розташуйте електропростирадло на матрац нижче подушки, накрийте його звичайним простирадлом та ковдрою. Переконайтеся в тому, що електропростирадло розправлене по поверхні ліжка та під час застосування не буде згинатися та утворювати зморшки.',
+  'Вставте штекер у розетку, та увімкніть на максимальний рівень температури. ВКАЗІВКА — ми наполегливо рекомендуємо увімкнути електропростирадло за 30 хвилин до сну і накрити його ковдрою, щоб уникнути втрати тепла.',
+  'Лягаючи в ліжко, перемкніть перемикач в комфортний для Вас режим роботи.',
+  'Після сну вимкніть електропростирадло і витягніть штекер з розетки.',
+  'УВАГА! — Не вмикайте електропростирадло в складеному вигляді, не складайте електропростирадло в увімкненому стані в два чи більше разів, не використовуйте як ковдру або подушку, уникайте надмірного перегинання проводів усередині електропростирадла, уникайте проколів гострими предметами та попадання води.',
+  'Заборонено використовувати людям зі зниженою чутливістю до тепла та особам, які потребують догляду, оскільки вони не можуть адекватно реагувати на перегрів.',
+  'Електричне простирадло заборонено використовувати дітям до 3-х років.',
+  'Заборонено самостійно використовувати дітям (3-8 років), за винятком випадків налаштування дорослими або навчання дитини безпечному використанню.',
+  'Особам з кардіостимуляторами попередньо проконсультуйтесь зі своїм лікарем.',
+  'Забороняється прати в пральній машині (окрім моделей з знімним перемикачем) та прасувати.',
+  'Прилад має використовуватися тільки для нагрівання тіла на ліжках упродовж сну.',
+  'Це електроприлад, тому не залишайте включений виріб без нагляду!'
+];
+
+const WARRANTY_NOTE = "Пам'ятайте, ЕЛЕКТРОПРОСТИРАДЛО це не батарея, воно випромінює ПОМІРНЕ тепло, щоб не створювати додаткове навантаження на серцево-судинну систему людини.";
+const WARRANTY_SAFE = 'При правильному використанні воно абсолютно безпечне і нешкідливе!';
+const WARRANTY_TERMS_INTRO = 'Гарантійний термін вказано в полі з назвою товару та діє з дати придбання. В умови гарантії не входять поломки внаслідок:';
+const WARRANTY_TERMS_LIST = [
+  'використання приладу з порушенням інструкції;',
+  'використання в технічних умовах, які відрізняються від паспортних;',
+  'короткого замикання або перепадів напруги;',
+  'використання приладу не за призначенням або недбалого використання;',
+  'спроб виправити, почистити або відремонтувати самостійно.'
+];
+const WARRANTY_REPAIR = "У випадку браку магазин зобов'язується замінити виріб протягом 14 днів. Товар приймається на ремонт лише в чистому вигляді!";
+const WARRANTY_KEEP = 'ЗБЕРІГАЙТЕ ДАНИЙ ТАЛОН ВПРОДОВЖ ТЕРМІНУ ДІЇ ГАРАНТІЇ';
+const WARRANTY_CONTACTS_INTRO = 'Якщо виникла проблема, зверніться за номерами телефонів:';
+const WARRANTY_CONTACTS = 'Контакти: 0976802779, 0934217898, 0952481319';
+
+function formatDateUA(d) {
+  const date = d ? new Date(d) : new Date();
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+  return `${day}.${month}.${year}`;
+}
+
+function randomDocNumber() {
+  return String(Math.floor(100000000 + Math.random() * 900000000));
+}
 
 const SD_DOMAIN = process.env.SALESDRIVE_DOMAIN || 'https://ekvator.salesdrive.me';
 const SD_FORM_API_KEY = process.env.SALESDRIVE_FORM_API_KEY;
@@ -92,9 +145,9 @@ router.post('/import', async (req, res) => {
 
       for (const item of mapped.products) {
         await pool.query(
-          `INSERT INTO orders (sd_id, last_name, first_name, product_name, qty, price, ttn, carrier, status)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-          [mapped.sdId, mapped.lastName, mapped.firstName, item.name, item.qty, item.price, mapped.ttn, mapped.carrier, mapped.status]
+          `INSERT INTO orders (sd_id, last_name, first_name, phone, product_name, doc_name, qty, price, ttn, carrier, status)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+          [mapped.sdId, mapped.lastName, mapped.firstName, mapped.phone, item.name, item.docName, item.qty, item.price, mapped.ttn, mapped.carrier, mapped.status]
         );
         addedRows++;
       }
@@ -113,10 +166,12 @@ function mapSalesDriveOrder(sdOrder) {
   }
   const products = rawProducts.map((p) => ({
     name: p.text || p.documentName || p.name || p.title || '',
+    // "Назва для документів" у SalesDrive — саме її показуємо в гарантійних талонах.
+    docName: p.documentName || p.text || p.name || p.title || '',
     qty: p.amount || p.qty || 1,
     price: p.price || p.costPerItem || 0
   }));
-  if (!products.length) products.push({ name: '', qty: 1, price: 0 });
+  if (!products.length) products.push({ name: '', docName: '', qty: 1, price: 0 });
 
   const contact = sdOrder.primaryContact || {};
   const phoneArr = contact.phone;
@@ -259,6 +314,151 @@ router.post('/finish', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Помилка сервера при завершенні: ' + err.message });
+  }
+});
+
+// ======================= ГЕНЕРАЦІЯ ГАРАНТІЙНИХ ТАЛОНІВ / ЗАМОВЛЕНЬ (PDF) =======================
+// items: [{ sdId, isWarranty }] — у ТОМУ Ж порядку, що й вибрані/відсортовані замовлення на екрані.
+// isWarranty=true  -> повний "Гарантійний талон" з інструкцією
+// isWarranty=false -> сторінка "Замовлення" з рекламним блоком магазину
+
+router.post('/print-warranty', async (req, res) => {
+  try {
+    const { items } = req.body;
+    if (!Array.isArray(items) || !items.length) {
+      return res.status(400).json({ error: 'Виберіть хоча б одне замовлення.' });
+    }
+
+    const doc = new PDFDocument({ size: 'A4', margin: 40, autoFirstPage: false });
+    doc.registerFont('regular', FONT_REGULAR);
+    doc.registerFont('bold', FONT_BOLD);
+
+    const chunks = [];
+    doc.on('data', (chunk) => chunks.push(chunk));
+    const donePromise = new Promise((resolve) => doc.on('end', resolve));
+
+    for (const item of items) {
+      const sdId = item.sdId;
+      const isWarranty = !!item.isWarranty;
+
+      const result = await pool.query(
+        'SELECT last_name, first_name, phone, ttn, product_name, doc_name, qty, price, created_at FROM orders WHERE sd_id = $1 ORDER BY id ASC',
+        [sdId]
+      );
+      if (!result.rows.length) continue;
+
+      const first = result.rows[0];
+      let totalQty = 0;
+      const products = result.rows.map((r) => {
+        const qty = Number(r.qty) || 0;
+        totalQty += qty;
+        return { name: r.doc_name || r.product_name || '', qty, price: Number(r.price) || 0 };
+      });
+
+      doc.addPage();
+      const pageWidth = doc.page.width;
+      const marginLeft = 40;
+      const tableWidth = pageWidth - marginLeft * 2;
+
+      // --- Верхній блок: дата, номер замовлення, ТТН, талон/замовлення №, клієнт ---
+      doc.font('regular').fontSize(13);
+      doc.text(`Дата: ${formatDateUA(first.created_at)}     ${sdId}`, marginLeft, 40);
+      doc.font('bold').fontSize(14).text(`ТТН ${first.ttn || '—'}`, marginLeft, 60);
+      doc.font('regular').fontSize(13).text(
+        isWarranty ? `Гарантійний талон № ${randomDocNumber()}` : `Замовлення №  ${randomDocNumber()}`,
+        marginLeft, 82
+      );
+      doc.text(`${first.last_name || ''} ${first.first_name || ''} ${first.phone || ''}`.trim(), marginLeft, 102);
+
+      // --- Величезна цифра — загальна кількість товарів у замовленні (жирна, мінімум 3 см) ---
+      doc.font('bold').fontSize(130);
+      doc.text(String(totalQty), 0, 15, { width: pageWidth - 40, align: 'right' });
+
+      // --- Таблиця товарів ---
+      let y = 190;
+      const colProduct = marginLeft;
+      const colQty = pageWidth - 220;
+      const colPrice = pageWidth - 160;
+      const colSum = pageWidth - 90;
+      const productColWidth = colQty - colProduct - 10;
+
+      doc.font('bold').fontSize(11);
+      doc.text('Товари', colProduct, y, { width: productColWidth });
+      doc.text('К-ть', colQty, y, { width: 40 });
+      doc.text('Ціна, грн', colPrice, y, { width: 60 });
+      doc.text('Сума, грн', colSum, y, { width: 60 });
+      y += 16;
+      doc.moveTo(marginLeft, y).lineTo(pageWidth - marginLeft, y).stroke();
+      y += 6;
+
+      doc.font('regular').fontSize(11);
+      for (const p of products) {
+        const sum = p.qty * p.price;
+        const nameHeight = doc.heightOfString(p.name, { width: productColWidth });
+        doc.text(p.name, colProduct, y, { width: productColWidth });
+        doc.text(String(p.qty), colQty, y, { width: 40 });
+        doc.text(p.price.toFixed(2), colPrice, y, { width: 60 });
+        doc.text(sum.toFixed(2), colSum, y, { width: 60 });
+        y += Math.max(nameHeight, 14) + 6;
+      }
+      doc.moveTo(marginLeft, y).lineTo(pageWidth - marginLeft, y).stroke();
+      y += 20;
+
+      if (isWarranty) {
+        doc.font('bold').fontSize(15).text('Шановний покупець!', marginLeft, y, { width: tableWidth, align: 'center' });
+        y = doc.y + 8;
+        doc.font('regular').fontSize(9).text(WARRANTY_INTRO, marginLeft, y, { width: tableWidth });
+        y = doc.y + 4;
+        doc.text(WARRANTY_INTRO2, marginLeft, y, { width: tableWidth });
+        y = doc.y + 8;
+
+        doc.font('bold').fontSize(11).text('Інструкція з використання:', marginLeft, y, { width: tableWidth, align: 'center' });
+        y = doc.y + 4;
+        doc.font('regular').fontSize(9);
+        WARRANTY_STEPS.forEach((step, idx) => {
+          doc.text(`${idx + 1}. ${step}`, marginLeft, y, { width: tableWidth });
+          y = doc.y + 3;
+        });
+
+        y += 2;
+        doc.text(WARRANTY_NOTE, marginLeft, y, { width: tableWidth });
+        y = doc.y + 6;
+        doc.font('bold').fontSize(11).text(WARRANTY_SAFE, marginLeft, y, { width: tableWidth, align: 'center' });
+        y = doc.y + 8;
+
+        doc.font('bold').fontSize(12).text('Гарантійний талон', marginLeft, y, { width: tableWidth, align: 'center' });
+        y = doc.y + 6;
+        doc.font('regular').fontSize(9).text(WARRANTY_TERMS_INTRO, marginLeft, y, { width: tableWidth });
+        y = doc.y + 3;
+        WARRANTY_TERMS_LIST.forEach((line) => {
+          doc.text(`•  ${line}`, marginLeft, y, { width: tableWidth });
+          y = doc.y + 2;
+        });
+        y += 3;
+        doc.text(WARRANTY_REPAIR, marginLeft, y, { width: tableWidth });
+        y = doc.y + 8;
+
+        doc.font('bold').fontSize(11).text(WARRANTY_KEEP, marginLeft, y, { width: tableWidth, align: 'center' });
+        y = doc.y + 8;
+        doc.font('regular').fontSize(9).text(WARRANTY_CONTACTS_INTRO, marginLeft, y, { width: tableWidth });
+        y = doc.y + 5;
+        doc.font('bold').fontSize(11).text(WARRANTY_CONTACTS, marginLeft, y, { width: tableWidth, align: 'center' });
+      } else {
+        try {
+          doc.image(ORDER_FOOTER_IMAGE, marginLeft, y, { width: tableWidth });
+        } catch (imgErr) {
+          console.error('Помилка вставки зображення замовлення:', imgErr);
+        }
+      }
+    }
+
+    doc.end();
+    await donePromise;
+    const pdfBuffer = Buffer.concat(chunks);
+    res.json({ pdfBase64: pdfBuffer.toString('base64') });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Помилка сервера при генерації талонів: ' + err.message });
   }
 });
 
