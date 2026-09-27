@@ -6,6 +6,8 @@ const pool = require('../db/pool');
 const { authMiddleware } = require('./auth');
 const assets = require('../assets');
 
+const router = express.Router();
+
 // ======================= ШРИФТИ ТА ТЕКСТИ ДЛЯ ГАРАНТІЙНИХ ТАЛОНІВ =======================
 // Шрифти (DejaVu Sans, підтримують кирилицю) та картинка зберігаються в assets.js
 // у вигляді тексту (base64), щоб їх можна було завантажити на GitHub як звичайний .js файл.
