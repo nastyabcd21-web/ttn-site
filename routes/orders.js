@@ -33,6 +33,47 @@ function isDropFieldEmpty(sdOrder) {
   return false;
 }
 
+// ======================= ТИМЧАСОВИЙ DEBUG: ОДНЕ ЗАМОВЛЕННЯ ПОВНІСТЮ =======================
+// Використовується один раз, щоб знайти правильну технічну назву поля "Дроп" у ЧИТАННІ (list API).
+// ?name=Прізвище — знайти конкретне замовлення за прізвищем (частковий, регістронезалежний збіг).
+// Можна видалити цей роут пізніше.
+router.get('/debug-one', async (req, res) => {
+  try {
+    if (!SD_FORM_API_KEY) return res.status(500).json({ error: 'Не встановлено SALESDRIVE_FORM_API_KEY на сервері.' });
+    const nameQuery = String(req.query.name || '').trim().toLowerCase();
+
+    let page = 1;
+    let found = null;
+    let firstOrder = null;
+    while (page <= 10 && !found) {
+      const params = new URLSearchParams({ page: String(page), limit: '100', 'filter[statusId]': PULL_STATUS });
+      const response = await fetch(`${SD_DOMAIN}/api/order/list/?${params.toString()}`, {
+        method: 'GET',
+        headers: { 'Form-Api-Key': SD_FORM_API_KEY }
+      });
+      const rawText = await response.text();
+      if (!response.ok) return res.status(502).send(rawText);
+      const body = JSON.parse(rawText);
+      const pageOrders = body.data || body.orders || (Array.isArray(body) ? body : []);
+      if (!pageOrders.length) break;
+      if (!firstOrder) firstOrder = pageOrders[0];
+      if (nameQuery) {
+        found = pageOrders.find((o) => {
+          const contact = o.primaryContact || {};
+          const full = ((contact.lName || '') + ' ' + (contact.fName || '')).toLowerCase();
+          return full.indexOf(nameQuery) !== -1;
+        });
+      }
+      page++;
+    }
+
+    const result = found || firstOrder || { message: 'Нічого не знайдено' };
+    res.type('json').send(JSON.stringify(result, null, 2));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ======================= ІМПОРТ ЗАМОВЛЕНЬ ЗІ SALESDRIVE =======================
 
 router.post('/import', async (req, res) => {
