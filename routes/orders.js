@@ -16,25 +16,22 @@ const CARRIER_LABELS = { novaposhta: 'Нова пошта', ukrposhta: 'Укрп
 
 router.use(authMiddleware);
 
-// ======================= ТИМЧАСОВИЙ DEBUG: СИРІ ДАНІ ОДНОГО ЗАМОВЛЕННЯ =======================
-// Використовується один раз, щоб знайти технічну назву поля "Дроп" у відповіді SalesDrive.
-// Можна видалити цей роут пізніше.
+// Технічна назва поля "Дроп" у SalesDrive — виявлена в коді, що створює замовлення.
+// Імпортуємо тільки замовлення, де це поле ПУСТЕ.
+const DROP_FIELD_NAME = 'dropsipping2';
 
-router.get('/debug-raw', async (req, res) => {
-  try {
-    if (!SD_FORM_API_KEY) return res.status(500).json({ error: 'Не встановлено SALESDRIVE_FORM_API_KEY на сервері.' });
-    const params = new URLSearchParams({ page: '1', limit: '3', 'filter[statusId]': PULL_STATUS });
-    const response = await fetch(`${SD_DOMAIN}/api/order/list/?${params.toString()}`, {
-      method: 'GET',
-      headers: { 'Form-Api-Key': SD_FORM_API_KEY }
-    });
-    const rawText = await response.text();
-    if (!response.ok) return res.status(502).send(rawText);
-    res.type('json').send(rawText);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+function isDropFieldEmpty(sdOrder) {
+  let val = sdOrder[DROP_FIELD_NAME];
+  // Деякі API SalesDrive кладуть кастомні поля у вкладений об'єкт data — перевіряємо і це на всяк випадок.
+  if ((val === undefined || val === null) && sdOrder.data && typeof sdOrder.data === 'object') {
+    val = sdOrder.data[DROP_FIELD_NAME];
   }
-});
+  if (val === undefined || val === null) return true;
+  if (Array.isArray(val)) return val.length === 0;
+  if (typeof val === 'string') return val.trim() === '';
+  if (typeof val === 'object') return Object.keys(val).length === 0;
+  return false;
+}
 
 // ======================= ІМПОРТ ЗАМОВЛЕНЬ ЗІ SALESDRIVE =======================
 
@@ -72,7 +69,11 @@ router.post('/import', async (req, res) => {
     }
 
     let addedRows = 0;
+    let skippedDrop = 0;
     for (const sdOrder of sdOrders) {
+      // Пропускаємо замовлення, де поле "Дроп" НЕ пусте.
+      if (!isDropFieldEmpty(sdOrder)) { skippedDrop++; continue; }
+
       const mapped = mapSalesDriveOrder(sdOrder);
       // Пропускаємо замовлення, які вже завантажені (щоб не дублювати при повторному імпорті)
       const existing = await pool.query('SELECT id FROM orders WHERE sd_id = $1 LIMIT 1', [mapped.sdId]);
@@ -87,7 +88,7 @@ router.post('/import', async (req, res) => {
         addedRows++;
       }
     }
-    res.json({ message: `Завантажено замовлень зі SalesDrive: ${sdOrders.length} (сторінок: ${page}, нових рядків товарів: ${addedRows}).` });
+    res.json({ message: `Завантажено замовлень зі SalesDrive: ${sdOrders.length} (сторінок: ${page}, пропущено через поле "Дроп": ${skippedDrop}, нових рядків товарів: ${addedRows}).` });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Помилка сервера при імпорті: ' + err.message });
