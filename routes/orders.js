@@ -184,9 +184,17 @@ router.post('/print-ttn', async (req, res) => {
       [sdIds]
     );
 
+    // SQL "WHERE sd_id = ANY(...)" НЕ гарантує порядок рядків — тому будуємо мапу
+    // і потім проходимо по sdIds у ТОМУ порядку, в якому їх передав фронтенд
+    // (тобто в порядку, як замовлення відсортовані/вибрані на екрані).
+    const rowsBySdId = {};
+    for (const row of result.rows) rowsBySdId[row.sd_id] = row;
+
     const ttns = [];
     const manualCarrierOrders = [];
-    for (const row of result.rows) {
+    for (const sdId of sdIds) {
+      const row = rowsBySdId[sdId];
+      if (!row) continue;
       if (AUTO_PRINT_CARRIERS.indexOf(row.carrier) === -1) {
         manualCarrierOrders.push(`${row.sd_id} (${CARRIER_LABELS[row.carrier] || row.carrier || 'невідомий перевізник'})`);
       } else if (row.ttn) {
