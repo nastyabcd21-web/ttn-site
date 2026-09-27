@@ -8,6 +8,29 @@ const assets = require('../assets');
 
 const router = express.Router();
 
+// ===== ТИМЧАСОВИЙ debug-маршрут для з'ясування реальних шляхів API Rozetka Delivery =====
+// (буде видалено після того, як розберемось з друком Rozetka)
+router.get('/debug-rozetka-paths', async (req, res) => {
+  try {
+    const base = process.env.ROZETKA_API_BASE || 'https://rz-delivery.rozetka.ua/api';
+    const url = base.replace(/\/api$/, '') + '/api/docs-json';
+    const response = await fetch(url);
+    const text = await response.text();
+    let spec;
+    try { spec = JSON.parse(text); } catch (e) {
+      return res.status(200).type('text/plain; charset=utf-8').send('Не JSON, статус ' + response.status + ':\n' + text.substring(0, 2000));
+    }
+    const pathKeys = Object.keys(spec.paths || {});
+    const labelPaths = pathKeys.filter((p) => p.toLowerCase().includes('label') || p.toLowerCase().includes('track'));
+    res.status(200).type('text/plain; charset=utf-8').send(
+      'УСІ ШЛЯХИ (' + pathKeys.length + '):\n' + pathKeys.join('\n') +
+      '\n\n--- ШЛЯХИ З "track" АБО "label" ---\n' + labelPaths.join('\n')
+    );
+  } catch (err) {
+    res.status(200).type('text/plain; charset=utf-8').send('Помилка: ' + err.message);
+  }
+});
+
 // ======================= ШРИФТИ ТА ТЕКСТИ ДЛЯ ГАРАНТІЙНИХ ТАЛОНІВ =======================
 // Шрифти (DejaVu Sans, підтримують кирилицю) та картинка зберігаються в assets.js
 // у вигляді тексту (base64), щоб їх можна було завантажити на GitHub як звичайний .js файл.
