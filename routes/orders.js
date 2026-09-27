@@ -6,57 +6,6 @@ const pool = require('../db/pool');
 const { authMiddleware } = require('./auth');
 const assets = require('../assets');
 
-const router = express.Router();
-
-// ===== ТИМЧАСОВИЙ debug-маршрут: шукаємо правильний API prom.ua для друку ТТН Rozetka Delivery через Prom =====
-router.get('/debug-prom-api', async (req, res) => {
-  const token = process.env.PROM_API_TOKEN || '';
-  const out = [];
-
-  // 1) Реальний JSON-опис API (знайдений через swagger UI на prom.ua)
-  try {
-    const specUrl = 'https://prom.ua/cloud-cgi/static/uaprom-static/docs/swagger/documentation.json';
-    const response = await fetch(specUrl);
-    const text = await response.text();
-    out.push(`===== ${specUrl} =====\nHTTP ${response.status}\n`);
-    try {
-      const spec = JSON.parse(text);
-      const paths = spec.paths ? Object.keys(spec.paths) : [];
-      out.push(`ШЛЯХІВ (${paths.length}): ${paths.join(', ')}\n`);
-      // Виводимо тільки шляхи, що стосуються замовлень/доставки/ттн/декларацій
-      const relevant = paths.filter((p) => /order|ship|delivery|declaration|ttn|express|waybill|label|document/i.test(p));
-      relevant.forEach((p) => {
-        out.push(`--- ${p} ---\n${JSON.stringify(spec.paths[p], null, 2).substring(0, 2000)}\n`);
-      });
-      if (spec.securityDefinitions) out.push(`securityDefinitions: ${JSON.stringify(spec.securityDefinitions)}\n`);
-      if (spec.components && spec.components.securitySchemes) out.push(`securitySchemes: ${JSON.stringify(spec.components.securitySchemes)}\n`);
-    } catch (e) {
-      out.push(`Не вдалося розпарсити JSON: ${text.substring(0, 1000)}\n`);
-    }
-  } catch (e) {
-    out.push(`ПОМИЛКА при завантаженні specUrl: ${e.message}\n`);
-  }
-
-  // 2) Пробуємо реальний виклик з токеном різними способами авторизації
-  const testUrl = 'https://my.prom.ua/api/v1/orders/list?limit=1';
-  const authVariants = [
-    { name: 'Bearer', headers: { Authorization: `Bearer ${token}` } },
-    { name: 'Token', headers: { Authorization: `Token ${token}` } },
-    { name: 'X-Api-Key', headers: { 'X-Api-Key': token } }
-  ];
-  for (const variant of authVariants) {
-    try {
-      const response = await fetch(testUrl, { headers: variant.headers });
-      const text = await response.text();
-      out.push(`===== ${testUrl} (авторизація: ${variant.name}) =====\nHTTP ${response.status}\n${text.substring(0, 500)}\n`);
-    } catch (e) {
-      out.push(`===== ${testUrl} (авторизація: ${variant.name}) =====\nПОМИЛКА: ${e.message}\n`);
-    }
-  }
-
-  res.status(200).type('text/plain; charset=utf-8').send(out.join('\n'));
-});
-
 // ======================= ШРИФТИ ТА ТЕКСТИ ДЛЯ ГАРАНТІЙНИХ ТАЛОНІВ =======================
 // Шрифти (DejaVu Sans, підтримують кирилицю) та картинка зберігаються в assets.js
 // у вигляді тексту (base64), щоб їх можна було завантажити на GitHub як звичайний .js файл.
