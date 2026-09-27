@@ -1,17 +1,19 @@
 const express = require('express');
 const fetch = require('node-fetch');
-const path = require('path');
 const PDFDocument = require('pdfkit');
 const pool = require('../db/pool');
 const { authMiddleware } = require('./auth');
+const assets = require('../assets');
 
 const router = express.Router();
 
 // ======================= ШРИФТИ ТА ТЕКСТИ ДЛЯ ГАРАНТІЙНИХ ТАЛОНІВ =======================
+// Шрифти (DejaVu Sans, підтримують кирилицю) та картинка зберігаються в assets.js
+// у вигляді тексту (base64), щоб їх можна було завантажити на GitHub як звичайний .js файл.
 
-const FONT_REGULAR = path.join(__dirname, '..', 'DejaVuSans.ttf');
-const FONT_BOLD = path.join(__dirname, '..', 'DejaVuSans-Bold.ttf');
-const ORDER_FOOTER_IMAGE = path.join(__dirname, '..', 'order_footer.png');
+const FONT_REGULAR = Buffer.from(assets.fontRegularBase64, 'base64');
+const FONT_BOLD = Buffer.from(assets.fontBoldBase64, 'base64');
+const ORDER_FOOTER_IMAGE = Buffer.from(assets.orderFooterImageBase64, 'base64');
 
 const WARRANTY_INTRO = 'Дякуємо, що обираєте наш магазин. У нас Ви можете придбати безліч товарів з підігрівом: Електропростирадла, електроковдри, електрогрілки різного розміру, устілки, шкарпетки з підігрівом, хімічні грілки (для ніг, рук та тіла), спальні мішки та одяг з підігрівом, і багато іншого. Щоб користуватись цим товаром із задоволенням, уважно прочитайте інструкцію.';
 const WARRANTY_INTRO2 = 'Дотримуйтесь правил користування, і ця техніка служитиме вам довго та надійно.';
