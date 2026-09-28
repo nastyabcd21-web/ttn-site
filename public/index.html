@@ -94,6 +94,7 @@
         <button class="btn-secondary" id="printWarrantyBtn" onclick="printWarranty()">🎫 Друкувати талони (вибрані)</button>
         <button class="btn-secondary" onclick="openWarrantyModal()">⚙️ Гарантія по товарах</button>
         <button class="btn-danger" id="finishBtn" onclick="finishSelected()">✅ Завершити вибрані (статус + видалити)</button>
+        <button class="btn-danger" id="clearBtn" onclick="clearSelected()">🗑️ Очистити вибрані (тільки зі списку)</button>
         <input type="text" id="filterText" placeholder="🔎 Пошук: клієнт, товар, ТТН…" oninput="renderOrders()">
         <select id="filterCarrier" onchange="renderOrders()">
           <option value="">Усі перевізники</option>
@@ -134,6 +135,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=5"></script>
+  <script src="app.js?v=6"></script>
 </body>
 </html>
