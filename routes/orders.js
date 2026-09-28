@@ -15,13 +15,34 @@ router.get('/debug-order/:id', async (req, res) => {
     const sdDomain = process.env.SALESDRIVE_DOMAIN || 'https://ekvator.salesdrive.me';
     if (!sdFormApiKey) return res.status(200).type('text/plain; charset=utf-8').send('Немає SALESDRIVE_FORM_API_KEY');
 
-    const params = new URLSearchParams({ page: '1', limit: '100', 'filter[id]': req.params.id });
-    const response = await fetch(`${sdDomain}/api/order/list/?${params.toString()}`, {
-      method: 'GET',
-      headers: { 'Form-Api-Key': sdFormApiKey }
-    });
-    const rawText = await response.text();
-    res.status(200).type('text/plain; charset=utf-8').send(`HTTP ${response.status}\n\n${rawText}`);
+    const targetId = String(req.params.id);
+    // SalesDrive ігнорує filter[id] — перебираємо сторінки (як при звичайному імпорті),
+    // поки не знайдемо потрібне замовлення, або поки сторінки не скінчаться.
+    let page = 1;
+    let found = null;
+    while (page <= 200) {
+      const params = new URLSearchParams({ page: String(page), limit: '100' });
+      const response = await fetch(`${sdDomain}/api/order/list/?${params.toString()}`, {
+        method: 'GET',
+        headers: { 'Form-Api-Key': sdFormApiKey }
+      });
+      const rawText = await response.text();
+      if (!response.ok) return res.status(200).type('text/plain; charset=utf-8').send(`HTTP ${response.status} на сторінці ${page}\n${rawText.substring(0, 500)}`);
+      let body;
+      try { body = JSON.parse(rawText); } catch (e) {
+        return res.status(200).type('text/plain; charset=utf-8').send(`Не-JSON на сторінці ${page}: ${rawText.substring(0, 500)}`);
+      }
+      const pageOrders = body.data || body.orders || (Array.isArray(body) ? body : []);
+      if (!Array.isArray(pageOrders) || pageOrders.length === 0) break;
+      found = pageOrders.find((o) => String(o.id || o.orderId) === targetId);
+      if (found) break;
+      page++;
+    }
+
+    if (!found) {
+      return res.status(200).type('text/plain; charset=utf-8').send(`Замовлення ${targetId} не знайдено (переглянуто сторінок: ${page}).`);
+    }
+    res.status(200).type('text/plain; charset=utf-8').send(JSON.stringify(found, null, 2));
   } catch (err) {
     res.status(200).type('text/plain; charset=utf-8').send('Помилка: ' + err.message);
   }
