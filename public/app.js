@@ -298,3 +298,16 @@ async function finishSelected() {
     alert('Помилка: ' + err.message);
   }
 }
+
+async function clearSelected() {
+  const ids = getSelectedIds();
+  if (!ids.length) { alert('Виберіть хоча б одне замовлення.'); return; }
+  if (!confirm('Прибрати ' + ids.length + ' замовлень ТІЛЬКИ з цього списку? Статус у SalesDrive НЕ зміниться — якщо замовлення ще не оброблене, воно знову з\'явиться при наступному завантаженні зі SalesDrive.')) return;
+  try {
+    const res = await api('/orders/clear', { method: 'POST', body: JSON.stringify({ sdIds: ids }) });
+    alert(res.message);
+    await loadOrders();
+  } catch (err) {
+    alert('Помилка: ' + err.message);
+  }
+}
