@@ -20,7 +20,11 @@ router.get('/debug-order/:id', async (req, res) => {
     // поки не знайдемо потрібне замовлення, або поки сторінки не скінчаться.
     let page = 1;
     let found = null;
+    // SalesDrive обмежує: не більше 10 запитів на хвилину до /api/order/list/ —
+    // тому чекаємо між сторінками, щоб не впертися в цей ліміт.
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     while (page <= 200) {
+      if (page > 1) await sleep(6500);
       const params = new URLSearchParams({ page: String(page), limit: '100' });
       const response = await fetch(`${sdDomain}/api/order/list/?${params.toString()}`, {
         method: 'GET',
@@ -210,7 +214,11 @@ router.post('/import', async (req, res) => {
     const PAGE_LIMIT = 100;
     let page = 1;
     let sdOrders = [];
+    // SalesDrive обмежує: не більше 10 запитів на хвилину до /api/order/list/ —
+    // якщо сторінок багато, чекаємо між запитами, щоб не впертися в цей ліміт.
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     while (true) {
+      if (page > 1) await sleep(6500);
       const params = new URLSearchParams({ page: String(page), limit: String(PAGE_LIMIT), 'filter[statusId]': PULL_STATUS });
       const response = await fetch(`${SD_DOMAIN}/api/order/list/?${params.toString()}`, {
         method: 'GET',
