@@ -537,7 +537,7 @@ router.post('/print-ttn', async (req, res) => {
       }
     }
 
-    if (!npTtns.length && !rozetkaTtns.length && !manualCarrierOrders.length) {
+    if (!npTtns.length && !rozetkaTtns.length && !promOrdersToFetch.length && !manualCarrierOrders.length) {
       return res.status(400).json({ error: 'У вибраних замовленнях немає номерів ТТН.' });
     }
 
