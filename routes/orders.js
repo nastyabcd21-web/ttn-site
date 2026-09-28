@@ -8,64 +8,6 @@ const assets = require('../assets');
 
 const router = express.Router();
 
-// ===== ТИМЧАСОВИЙ debug-маршрут: що САМЕ зберігається в НАШІЙ базі для цього замовлення =====
-router.get('/debug-db-order/:id', async (req, res) => {
-  try {
-    const result = await pool.query(
-      'SELECT sd_id, product_name, doc_name, qty, price, ttn, carrier, status FROM orders WHERE sd_id = $1 ORDER BY id ASC',
-      [req.params.id]
-    );
-    if (!result.rows.length) return res.status(200).type('text/plain; charset=utf-8').send(`У БАЗІ немає замовлення ${req.params.id} (можливо, вже видалено після "Завершити").`);
-    res.status(200).type('text/plain; charset=utf-8').send(JSON.stringify(result.rows, null, 2));
-  } catch (err) {
-    res.status(200).type('text/plain; charset=utf-8').send('Помилка: ' + err.message);
-  }
-});
-
-// ===== ТИМЧАСОВИЙ debug-маршрут: дивимось СИРІ дані одного замовлення зі SalesDrive =====
-router.get('/debug-order/:id', async (req, res) => {
-  try {
-    const sdFormApiKey = process.env.SALESDRIVE_FORM_API_KEY;
-    const sdDomain = process.env.SALESDRIVE_DOMAIN || 'https://ekvator.salesdrive.me';
-    if (!sdFormApiKey) return res.status(200).type('text/plain; charset=utf-8').send('Немає SALESDRIVE_FORM_API_KEY');
-
-    const targetId = String(req.params.id);
-    // SalesDrive ігнорує filter[id] — перебираємо сторінки (як при звичайному імпорті),
-    // поки не знайдемо потрібне замовлення, або поки сторінки не скінчаться.
-    let page = 1;
-    let found = null;
-    // SalesDrive обмежує: не більше 10 запитів на хвилину до /api/order/list/ —
-    // тому чекаємо між сторінками, щоб не впертися в цей ліміт.
-    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-    while (page <= 200) {
-      if (page > 1) await sleep(6500);
-      const params = new URLSearchParams({ page: String(page), limit: '100' });
-      const response = await fetch(`${sdDomain}/api/order/list/?${params.toString()}`, {
-        method: 'GET',
-        headers: { 'Form-Api-Key': sdFormApiKey }
-      });
-      const rawText = await response.text();
-      if (!response.ok) return res.status(200).type('text/plain; charset=utf-8').send(`HTTP ${response.status} на сторінці ${page}\n${rawText.substring(0, 500)}`);
-      let body;
-      try { body = JSON.parse(rawText); } catch (e) {
-        return res.status(200).type('text/plain; charset=utf-8').send(`Не-JSON на сторінці ${page}: ${rawText.substring(0, 500)}`);
-      }
-      const pageOrders = body.data || body.orders || (Array.isArray(body) ? body : []);
-      if (!Array.isArray(pageOrders) || pageOrders.length === 0) break;
-      found = pageOrders.find((o) => String(o.id || o.orderId) === targetId);
-      if (found) break;
-      page++;
-    }
-
-    if (!found) {
-      return res.status(200).type('text/plain; charset=utf-8').send(`Замовлення ${targetId} не знайдено (переглянуто сторінок: ${page}).`);
-    }
-    res.status(200).type('text/plain; charset=utf-8').send(JSON.stringify(found, null, 2));
-  } catch (err) {
-    res.status(200).type('text/plain; charset=utf-8').send('Помилка: ' + err.message);
-  }
-});
-
 // ======================= ШРИФТИ ТА ТЕКСТИ ДЛЯ ГАРАНТІЙНИХ ТАЛОНІВ =======================
 // Шрифти (DejaVu Sans, підтримують кирилицю) та картинка зберігаються в assets.js
 // у вигляді тексту (base64), щоб їх можна було завантажити на GitHub як звичайний .js файл.
@@ -290,6 +232,77 @@ router.post('/import', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Помилка сервера при імпорті: ' + err.message });
+  }
+});
+
+// ======================= ОНОВЛЕННЯ НАЗВ ТОВАРІВ ДЛЯ ВЖЕ ЗАВАНТАЖЕНИХ ЗАМОВЛЕНЬ =======================
+// Якщо "Назву для документів" (чи звичайну назву) відредагували в SalesDrive ПІСЛЯ того,
+// як замовлення вже потрапило на наш сайт — назва тут "застигає" такою, якою була на момент
+// завантаження. Цей маршрут перетягує актуальні назви зі SalesDrive для замовлень, які вже
+// є в нашому списку (без додавання нових замовлень і без дублювання рядків).
+
+router.post('/refresh-names', async (req, res) => {
+  try {
+    if (!SD_FORM_API_KEY) return res.status(500).json({ error: 'Не встановлено SALESDRIVE_FORM_API_KEY на сервері.' });
+
+    const idsResult = await pool.query('SELECT DISTINCT sd_id FROM orders');
+    const remaining = new Set(idsResult.rows.map((r) => String(r.sd_id)));
+    if (!remaining.size) return res.json({ message: 'У списку немає замовлень для оновлення.' });
+
+    // SalesDrive обмежує: не більше 10 запитів на хвилину до /api/order/list/ —
+    // тому чекаємо між сторінками. Зупиняємось раніше, якщо вже знайшли всі потрібні замовлення.
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const PAGE_LIMIT = 100;
+    const MAX_PAGES = 40;
+    let page = 1;
+    let updatedOrders = 0;
+    let updatedRows = 0;
+    let skippedMismatch = 0;
+
+    while (page <= MAX_PAGES && remaining.size > 0) {
+      if (page > 1) await sleep(6500);
+      const params = new URLSearchParams({ page: String(page), limit: String(PAGE_LIMIT) });
+      const response = await fetch(`${SD_DOMAIN}/api/order/list/?${params.toString()}`, {
+        method: 'GET',
+        headers: { 'Form-Api-Key': SD_FORM_API_KEY }
+      });
+      const rawText = await response.text();
+      if (!response.ok) break;
+      let body;
+      try { body = JSON.parse(rawText); } catch (e) { break; }
+      const pageOrders = body.data || body.orders || (Array.isArray(body) ? body : []);
+      if (!Array.isArray(pageOrders) || pageOrders.length === 0) break;
+
+      for (const sdOrder of pageOrders) {
+        const sdId = String(sdOrder.id || sdOrder.orderId);
+        if (!remaining.has(sdId)) continue;
+        remaining.delete(sdId);
+
+        const mapped = mapSalesDriveOrder(sdOrder);
+        const dbRows = await pool.query('SELECT id FROM orders WHERE sd_id = $1 ORDER BY id ASC', [sdId]);
+        // Оновлюємо, тільки якщо кількість товарів співпадає — інакше ризикуємо
+        // переплутати, який рядок якому товару відповідає.
+        if (dbRows.rows.length !== mapped.products.length) { skippedMismatch++; continue; }
+
+        for (let i = 0; i < dbRows.rows.length; i++) {
+          await pool.query(
+            'UPDATE orders SET product_name = $1, doc_name = $2 WHERE id = $3',
+            [mapped.products[i].name, mapped.products[i].docName, dbRows.rows[i].id]
+          );
+          updatedRows++;
+        }
+        updatedOrders++;
+      }
+      page++;
+    }
+
+    const parts = [`Оновлено назви для ${updatedOrders} замовлень (${updatedRows} рядків товарів).`];
+    if (skippedMismatch) parts.push(`Пропущено (кількість товарів не збіглась): ${skippedMismatch}.`);
+    if (remaining.size) parts.push(`Не знайдено серед переглянутих сторінок: ${remaining.size} замовлень.`);
+    res.json({ message: parts.join(' ') });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Помилка сервера при оновленні назв: ' + err.message });
   }
 });
 
