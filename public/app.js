@@ -98,6 +98,20 @@ async function importOrders() {
   }
 }
 
+async function refreshProductNames() {
+  const btn = document.getElementById('refreshNamesBtn');
+  btn.disabled = true; btn.textContent = 'Оновлюємо… (може зайняти хвилину)';
+  try {
+    const res = await api('/orders/refresh-names', { method: 'POST' });
+    alert(res.message);
+    await loadOrders();
+  } catch (err) {
+    alert('Помилка: ' + err.message);
+  } finally {
+    btn.disabled = false; btn.textContent = '🔄 Оновити назви товарів';
+  }
+}
+
 function sortedOrders() {
   const sortBy = document.getElementById('sortBy').value;
   const filterText = document.getElementById('filterText').value.trim().toLowerCase();
