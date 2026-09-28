@@ -21,14 +21,16 @@ CREATE TABLE IF NOT EXISTS orders (
   qty INTEGER DEFAULT 1,
   price NUMERIC DEFAULT 0,
   ttn TEXT DEFAULT '',
-  carrier TEXT DEFAULT '',             -- novaposhta / ukrposhta / rozetka_delivery / meest
+  carrier TEXT DEFAULT '',             -- novaposhta / ukrposhta / rozetkaDelivery / meest
   status TEXT DEFAULT '',
+  comment TEXT DEFAULT '',             -- коментар до замовлення зі SalesDrive
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
 -- Додаються безпечно і для вже існуючої бази даних (не видаляють наявні дані).
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS phone TEXT DEFAULT '';
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS doc_name TEXT DEFAULT '';
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS comment TEXT DEFAULT '';
 
 CREATE INDEX IF NOT EXISTS idx_orders_sd_id ON orders(sd_id);
 
