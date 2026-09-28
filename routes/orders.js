@@ -237,7 +237,9 @@ function mapSalesDriveOrder(sdOrder) {
     rawProducts = Object.keys(rawProducts).map((k) => rawProducts[k]);
   }
   const products = rawProducts.map((p) => ({
-    name: p.text || p.documentName || p.name || p.title || '',
+    // Звичайна назва товару — НІКОЛИ не підставляємо сюди "Назву для документів",
+    // навіть якщо основна назва порожня (щоб список "Гарантія по товарах" не змішувався).
+    name: p.text || p.name || p.title || '',
     // "Назва для документів" у SalesDrive — саме її показуємо в гарантійних талонах.
     docName: p.documentName || p.text || p.name || p.title || '',
     qty: p.amount || p.qty || 1,
@@ -502,10 +504,13 @@ router.post('/finish', async (req, res) => {
 
 router.get('/products', async (req, res) => {
   try {
+    // У цьому списку й для позначення "друкувати гарантію" ЗАВЖДИ використовуємо звичайну
+    // назву товару (product_name), а НЕ "Назву для документів" — щоб список був однорідним.
+    // "Назва для документів" (якщо є) використовується тільки в самому тексті талону/замовлення.
     const result = await pool.query(
-      `SELECT DISTINCT COALESCE(NULLIF(doc_name, ''), product_name) AS product_key
+      `SELECT DISTINCT product_name AS product_key
        FROM orders
-       WHERE COALESCE(NULLIF(doc_name, ''), product_name) <> ''
+       WHERE product_name <> ''
        ORDER BY product_key ASC`
     );
     const warrantyMap = await getProductWarrantyMap();
@@ -569,11 +574,13 @@ router.post('/print-warranty', async (req, res) => {
       const products = result.rows.map((r) => {
         const qty = Number(r.qty) || 0;
         totalQty += qty;
-        return { name: r.doc_name || r.product_name || '', qty, price: Number(r.price) || 0 };
+        // "key" — звичайна назва товару, саме нею позначено "друкувати гарантію" у списку товарів.
+        // "name" — те, що друкується на бланку: "Назва для документів", якщо заповнена, інакше звичайна назва.
+        return { key: r.product_name || '', name: r.doc_name || r.product_name || '', qty, price: Number(r.price) || 0 };
       });
       // Якщо серед товарів замовлення є хоч один, позначений у списку як "гарантійний" —
       // друкуємо повний гарантійний талон; інакше — сторінку "Замовлення".
-      const isWarranty = products.some((p) => warrantyMap[p.name] === true);
+      const isWarranty = products.some((p) => warrantyMap[p.key] === true);
 
       doc.addPage();
       const pageWidth = doc.page.width;
