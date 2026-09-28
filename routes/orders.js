@@ -5,42 +5,54 @@ const { PDFDocument: PDFLibDocument } = require('pdf-lib');
 const pool = require('../db/pool');
 const { authMiddleware } = require('./auth');
 const assets = require('../assets');
+const { getPromCookies } = require('../promAuth');
 
 const router = express.Router();
 
-// ===== ТИМЧАСОВИЙ debug-маршрут: пробуємо внутрішній ендпоінт my.prom.ua для друку етикетки =====
-router.get('/debug-prom-sticker', async (req, res) => {
+// ===== Друк етикетки Rozetka Delivery для замовлень, створених на Prom.ua (TTN виду PRM-...) =====
+// SalesDrive для таких замовлень друкує етикетку через внутрішній (недокументований)
+// ендпоінт my.prom.ua, який працює лише з cookie-сесією авторизованого користувача,
+// а не з API-токеном. Тому тут ми самі "заходимо" на prom.ua під логіном/паролем
+// (через promAuth.js) і використовуємо отримані cookies для запиту етикетки.
+async function fetchPromSticker(orderId, declarationId, cookies) {
+  const url = `https://my.prom.ua/remote/delivery/rozetka_delivery/get_sticker?order_id=${encodeURIComponent(orderId)}&declaration_id=${encodeURIComponent(declarationId)}`;
+  return fetch(url, { headers: { Cookie: cookies } });
+}
+
+function isPdfResponse(response) {
+  const contentType = response.headers.get('content-type') || '';
+  return contentType.includes('pdf') || contentType.includes('octet-stream');
+}
+
+router.get('/rozetka-prom-sticker', async (req, res) => {
   const orderId = req.query.order_id;
   const declarationId = req.query.declaration_id;
-  const token = process.env.PROM_API_TOKEN || '';
   if (!orderId || !declarationId) {
-    return res.status(200).type('text/plain; charset=utf-8').send('Треба передати ?order_id=...&declaration_id=...');
+    return res.status(400).json({ error: 'Треба передати order_id та declaration_id.' });
   }
-  const url = `https://my.prom.ua/remote/delivery/rozetka_delivery/get_sticker?order_id=${encodeURIComponent(orderId)}&declaration_id=${encodeURIComponent(declarationId)}`;
-  const out = [];
-  const authVariants = [
-    { name: 'Без токена', headers: {} },
-    { name: 'Bearer', headers: { Authorization: `Bearer ${token}` } },
-    { name: 'Token', headers: { Authorization: `Token ${token}` } }
-  ];
-  for (const variant of authVariants) {
-    try {
-      const response = await fetch(url, { headers: variant.headers });
-      const contentType = response.headers.get('content-type') || '';
-      let bodyPreview;
-      if (contentType.includes('pdf') || contentType.includes('octet-stream')) {
-        const buf = await response.buffer();
-        bodyPreview = `[БІНАРНІ ДАНІ, ${buf.length} байт, content-type: ${contentType}]`;
-      } else {
-        const text = await response.text();
-        bodyPreview = text.substring(0, 400);
-      }
-      out.push(`===== ${variant.name} =====\nHTTP ${response.status}, content-type: ${contentType}\n${bodyPreview}\n`);
-    } catch (e) {
-      out.push(`===== ${variant.name} =====\nПомилка: ${e.message}\n`);
+  try {
+    let cookies = await getPromCookies();
+    let response = await fetchPromSticker(orderId, declarationId, cookies);
+
+    // Якщо з кешованими cookies не вийшло (сесія застаріла) — заходимо на prom.ua ще раз.
+    if (!response.ok || !isPdfResponse(response)) {
+      cookies = await getPromCookies(true);
+      response = await fetchPromSticker(orderId, declarationId, cookies);
     }
+
+    if (!response.ok || !isPdfResponse(response)) {
+      const text = await response.text().catch(() => '');
+      console.error('Не вдалося отримати етикетку з prom.ua:', response.status, text.substring(0, 300));
+      return res.status(502).json({ error: 'Prom.ua не повернув етикетку (можливо, змінилась структура сайту або сесія не пройшла).' });
+    }
+
+    const buf = await response.buffer();
+    res.set('Content-Type', 'application/pdf');
+    res.send(buf);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Помилка при отриманні етикетки з prom.ua: ' + err.message });
   }
-  res.status(200).type('text/plain; charset=utf-8').send(out.join('\n'));
 });
 
 // ======================= ШРИФТИ ТА ТЕКСТИ ДЛЯ ГАРАНТІЙНИХ ТАЛОНІВ =======================
@@ -256,9 +268,9 @@ router.post('/import', async (req, res) => {
 
       for (const item of mapped.products) {
         await pool.query(
-          `INSERT INTO orders (sd_id, last_name, first_name, phone, product_name, doc_name, qty, price, ttn, carrier, status, comment)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-          [mapped.sdId, mapped.lastName, mapped.firstName, mapped.phone, item.name, item.docName, item.qty, item.price, mapped.ttn, mapped.carrier, mapped.status, mapped.comment]
+          `INSERT INTO orders (sd_id, last_name, first_name, phone, product_name, doc_name, qty, price, ttn, carrier, status, comment, prom_order_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+          [mapped.sdId, mapped.lastName, mapped.firstName, mapped.phone, item.name, item.docName, item.qty, item.price, mapped.ttn, mapped.carrier, mapped.status, mapped.comment, mapped.promOrderId]
         );
         addedRows++;
       }
@@ -321,8 +333,8 @@ router.post('/refresh-names', async (req, res) => {
 
         for (let i = 0; i < dbRows.rows.length; i++) {
           await pool.query(
-            'UPDATE orders SET product_name = $1, doc_name = $2, comment = $3 WHERE id = $4',
-            [mapped.products[i].name, mapped.products[i].docName, mapped.comment, dbRows.rows[i].id]
+            'UPDATE orders SET product_name = $1, doc_name = $2, comment = $3, prom_order_id = $4 WHERE id = $5',
+            [mapped.products[i].name, mapped.products[i].docName, mapped.comment, mapped.promOrderId, dbRows.rows[i].id]
           );
           updatedRows++;
         }
@@ -366,6 +378,9 @@ function mapSalesDriveOrder(sdOrder) {
   const delivery = deliveryData[0] || {};
   const carrier = delivery.provider || sdOrder.shipping_method || '';
   const ttn = delivery.trackingNumber || sdOrder.ttn || '';
+  // Внутрішній ID замовлення на самому Prom.ua — потрібен для друку етикетки
+  // Rozetka Delivery через my.prom.ua (тільки для замовлень з Prom, TTN виду PRM-...).
+  const promOrderId = delivery.orderExternalId || '';
 
   return {
     sdId: String(sdOrder.id || sdOrder.orderId),
@@ -374,6 +389,7 @@ function mapSalesDriveOrder(sdOrder) {
     phone,
     ttn,
     carrier,
+    promOrderId,
     status: String(sdOrder.statusId || sdOrder.status || PULL_STATUS),
     comment: sdOrder.comment || '',
     products
@@ -482,7 +498,7 @@ router.post('/print-ttn', async (req, res) => {
     if (!Array.isArray(sdIds) || !sdIds.length) return res.status(400).json({ error: 'Виберіть хоча б одне замовлення.' });
 
     const result = await pool.query(
-      'SELECT DISTINCT ON (sd_id) sd_id, ttn, carrier FROM orders WHERE sd_id = ANY($1)',
+      'SELECT DISTINCT ON (sd_id) sd_id, ttn, carrier, prom_order_id FROM orders WHERE sd_id = ANY($1)',
       [sdIds]
     );
 
@@ -494,17 +510,25 @@ router.post('/print-ttn', async (req, res) => {
 
     const npTtns = [];
     const rozetkaTtns = [];
+    const promOrdersToFetch = []; // { sdId, ttn, promOrderId } — етикетка через логін на prom.ua
     const manualCarrierOrders = [];
     for (const sdId of sdIds) {
       const row = rowsBySdId[sdId];
       if (!row) continue;
       const ttnTrimmed = row.ttn ? String(row.ttn).trim() : '';
       // ТТН з префіксом "PRM-" — це замовлення, створені на сайті Prom.ua
-      // (інший обліковий запис у Rozetka Delivery), наш токен їх не бачить —
-      // такі завжди йдуть у список "друкувати вручну".
+      // (інший обліковий запис у Rozetka Delivery). Наш API-токен їх не бачить,
+      // тому такі етикетки отримуємо через логін-автоматизацію на my.prom.ua,
+      // а якщо не вдалось (немає prom_order_id або помилка) — у список "друкувати вручну".
       const isPromOrder = /^PRM-/i.test(ttnTrimmed);
-      if (AUTO_PRINT_CARRIERS.indexOf(row.carrier) === -1 || (row.carrier === 'rozetkaDelivery' && isPromOrder)) {
-        const label = isPromOrder ? 'Rozetka Delivery через Prom.ua' : (CARRIER_LABELS[row.carrier] || row.carrier || 'невідомий перевізник');
+      if (row.carrier === 'rozetkaDelivery' && isPromOrder) {
+        if (row.prom_order_id) {
+          promOrdersToFetch.push({ sdId: row.sd_id, ttn: ttnTrimmed, promOrderId: row.prom_order_id });
+        } else {
+          manualCarrierOrders.push(`${row.sd_id} (Rozetka Delivery через Prom.ua — невідомий ID замовлення на prom.ua, оновіть список)`);
+        }
+      } else if (AUTO_PRINT_CARRIERS.indexOf(row.carrier) === -1) {
+        const label = CARRIER_LABELS[row.carrier] || row.carrier || 'невідомий перевізник';
         manualCarrierOrders.push(`${row.sd_id} (${label})`);
       } else if (ttnTrimmed && row.carrier === 'novaposhta') {
         npTtns.push(ttnTrimmed);
@@ -557,8 +581,49 @@ router.post('/print-ttn', async (req, res) => {
       if (rozetkaErrors.length) rozetkaError = rozetkaErrors.join(' | ');
     }
 
+    let promBuffer = null;
+    let promError = '';
+    if (promOrdersToFetch.length) {
+      const promBuffers = [];
+      const promErrors = [];
+      let cookies = null;
+      try {
+        cookies = await getPromCookies();
+      } catch (e) {
+        promError = 'Не вдалося увійти на prom.ua: ' + e.message;
+      }
+      if (cookies) {
+        for (const item of promOrdersToFetch) {
+          try {
+            let response = await fetchPromSticker(item.promOrderId, item.ttn, cookies);
+            if (!response.ok || !isPdfResponse(response)) {
+              cookies = await getPromCookies(true);
+              response = await fetchPromSticker(item.promOrderId, item.ttn, cookies);
+            }
+            if (!response.ok || !isPdfResponse(response)) {
+              promErrors.push(`${item.sdId} (ТТН ${item.ttn})`);
+              continue;
+            }
+            promBuffers.push(await response.buffer());
+          } catch (e) {
+            promErrors.push(`${item.sdId} (ТТН ${item.ttn}: ${e.message})`);
+          }
+        }
+      } else {
+        promErrors.push(...promOrdersToFetch.map((item) => `${item.sdId} (ТТН ${item.ttn})`));
+      }
+      if (promBuffers.length === 1) {
+        promBuffer = promBuffers[0];
+      } else if (promBuffers.length > 1) {
+        promBuffer = await mergePdfBuffers(promBuffers);
+      }
+      if (promErrors.length) {
+        promError = (promError ? promError + ' | ' : '') + 'Не вдалося отримати етикетку через prom.ua для: ' + promErrors.join(', ');
+      }
+    }
+
     let pdfBase64 = '';
-    const partsToMerge = [npBuffer, rozetkaBuffer].filter(Boolean);
+    const partsToMerge = [npBuffer, rozetkaBuffer, promBuffer].filter(Boolean);
     if (partsToMerge.length === 1) {
       pdfBase64 = partsToMerge[0].toString('base64');
     } else if (partsToMerge.length > 1) {
@@ -572,6 +637,9 @@ router.post('/print-ttn', async (req, res) => {
     }
     if (rozetkaError) {
       messages.push(`ПОМИЛКА Rozetka Delivery: ` + rozetkaError);
+    }
+    if (promError) {
+      messages.push(`ПОМИЛКА Rozetka Delivery (Prom.ua): ` + promError);
     }
 
     res.json({ pdfBase64, manualMessage: messages.join(' ') });
