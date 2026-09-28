@@ -8,6 +8,25 @@ const assets = require('../assets');
 
 const router = express.Router();
 
+// ===== ТИМЧАСОВИЙ debug-маршрут: дивимось СИРІ дані одного замовлення зі SalesDrive =====
+router.get('/debug-order/:id', async (req, res) => {
+  try {
+    const sdFormApiKey = process.env.SALESDRIVE_FORM_API_KEY;
+    const sdDomain = process.env.SALESDRIVE_DOMAIN || 'https://ekvator.salesdrive.me';
+    if (!sdFormApiKey) return res.status(200).type('text/plain; charset=utf-8').send('Немає SALESDRIVE_FORM_API_KEY');
+
+    const params = new URLSearchParams({ page: '1', limit: '100', 'filter[id]': req.params.id });
+    const response = await fetch(`${sdDomain}/api/order/list/?${params.toString()}`, {
+      method: 'GET',
+      headers: { 'Form-Api-Key': sdFormApiKey }
+    });
+    const rawText = await response.text();
+    res.status(200).type('text/plain; charset=utf-8').send(`HTTP ${response.status}\n\n${rawText}`);
+  } catch (err) {
+    res.status(200).type('text/plain; charset=utf-8').send('Помилка: ' + err.message);
+  }
+});
+
 // ======================= ШРИФТИ ТА ТЕКСТИ ДЛЯ ГАРАНТІЙНИХ ТАЛОНІВ =======================
 // Шрифти (DejaVu Sans, підтримують кирилицю) та картинка зберігаються в assets.js
 // у вигляді тексту (base64), щоб їх можна було завантажити на GitHub як звичайний .js файл.
