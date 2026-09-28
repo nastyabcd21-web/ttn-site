@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS orders (
   carrier TEXT DEFAULT '',             -- novaposhta / ukrposhta / rozetkaDelivery / meest
   status TEXT DEFAULT '',
   comment TEXT DEFAULT '',             -- коментар до замовлення зі SalesDrive
+  prom_order_id TEXT DEFAULT '',       -- внутрішній ID замовлення на Prom.ua (для друку етикетки Rozetka Delivery)
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -31,6 +32,7 @@ CREATE TABLE IF NOT EXISTS orders (
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS phone TEXT DEFAULT '';
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS doc_name TEXT DEFAULT '';
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS comment TEXT DEFAULT '';
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS prom_order_id TEXT DEFAULT '';
 
 CREATE INDEX IF NOT EXISTS idx_orders_sd_id ON orders(sd_id);
 
