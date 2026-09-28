@@ -8,6 +8,41 @@ const assets = require('../assets');
 
 const router = express.Router();
 
+// ===== ТИМЧАСОВИЙ debug-маршрут: пробуємо внутрішній ендпоінт my.prom.ua для друку етикетки =====
+router.get('/debug-prom-sticker', async (req, res) => {
+  const orderId = req.query.order_id;
+  const declarationId = req.query.declaration_id;
+  const token = process.env.PROM_API_TOKEN || '';
+  if (!orderId || !declarationId) {
+    return res.status(200).type('text/plain; charset=utf-8').send('Треба передати ?order_id=...&declaration_id=...');
+  }
+  const url = `https://my.prom.ua/remote/delivery/rozetka_delivery/get_sticker?order_id=${encodeURIComponent(orderId)}&declaration_id=${encodeURIComponent(declarationId)}`;
+  const out = [];
+  const authVariants = [
+    { name: 'Без токена', headers: {} },
+    { name: 'Bearer', headers: { Authorization: `Bearer ${token}` } },
+    { name: 'Token', headers: { Authorization: `Token ${token}` } }
+  ];
+  for (const variant of authVariants) {
+    try {
+      const response = await fetch(url, { headers: variant.headers });
+      const contentType = response.headers.get('content-type') || '';
+      let bodyPreview;
+      if (contentType.includes('pdf') || contentType.includes('octet-stream')) {
+        const buf = await response.buffer();
+        bodyPreview = `[БІНАРНІ ДАНІ, ${buf.length} байт, content-type: ${contentType}]`;
+      } else {
+        const text = await response.text();
+        bodyPreview = text.substring(0, 400);
+      }
+      out.push(`===== ${variant.name} =====\nHTTP ${response.status}, content-type: ${contentType}\n${bodyPreview}\n`);
+    } catch (e) {
+      out.push(`===== ${variant.name} =====\nПомилка: ${e.message}\n`);
+    }
+  }
+  res.status(200).type('text/plain; charset=utf-8').send(out.join('\n'));
+});
+
 // ======================= ШРИФТИ ТА ТЕКСТИ ДЛЯ ГАРАНТІЙНИХ ТАЛОНІВ =======================
 // Шрифти (DejaVu Sans, підтримують кирилицю) та картинка зберігаються в assets.js
 // у вигляді тексту (base64), щоб їх можна було завантажити на GitHub як звичайний .js файл.
