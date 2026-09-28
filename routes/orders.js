@@ -8,6 +8,20 @@ const assets = require('../assets');
 
 const router = express.Router();
 
+// ===== ТИМЧАСОВИЙ debug-маршрут: що САМЕ зберігається в НАШІЙ базі для цього замовлення =====
+router.get('/debug-db-order/:id', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT sd_id, product_name, doc_name, qty, price, ttn, carrier, status FROM orders WHERE sd_id = $1 ORDER BY id ASC',
+      [req.params.id]
+    );
+    if (!result.rows.length) return res.status(200).type('text/plain; charset=utf-8').send(`У БАЗІ немає замовлення ${req.params.id} (можливо, вже видалено після "Завершити").`);
+    res.status(200).type('text/plain; charset=utf-8').send(JSON.stringify(result.rows, null, 2));
+  } catch (err) {
+    res.status(200).type('text/plain; charset=utf-8').send('Помилка: ' + err.message);
+  }
+});
+
 // ===== ТИМЧАСОВИЙ debug-маршрут: дивимось СИРІ дані одного замовлення зі SalesDrive =====
 router.get('/debug-order/:id', async (req, res) => {
   try {
