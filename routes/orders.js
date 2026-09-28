@@ -221,9 +221,9 @@ router.post('/import', async (req, res) => {
 
       for (const item of mapped.products) {
         await pool.query(
-          `INSERT INTO orders (sd_id, last_name, first_name, phone, product_name, doc_name, qty, price, ttn, carrier, status)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-          [mapped.sdId, mapped.lastName, mapped.firstName, mapped.phone, item.name, item.docName, item.qty, item.price, mapped.ttn, mapped.carrier, mapped.status]
+          `INSERT INTO orders (sd_id, last_name, first_name, phone, product_name, doc_name, qty, price, ttn, carrier, status, comment)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+          [mapped.sdId, mapped.lastName, mapped.firstName, mapped.phone, item.name, item.docName, item.qty, item.price, mapped.ttn, mapped.carrier, mapped.status, mapped.comment]
         );
         addedRows++;
       }
@@ -286,8 +286,8 @@ router.post('/refresh-names', async (req, res) => {
 
         for (let i = 0; i < dbRows.rows.length; i++) {
           await pool.query(
-            'UPDATE orders SET product_name = $1, doc_name = $2 WHERE id = $3',
-            [mapped.products[i].name, mapped.products[i].docName, dbRows.rows[i].id]
+            'UPDATE orders SET product_name = $1, doc_name = $2, comment = $3 WHERE id = $4',
+            [mapped.products[i].name, mapped.products[i].docName, mapped.comment, dbRows.rows[i].id]
           );
           updatedRows++;
         }
@@ -340,6 +340,7 @@ function mapSalesDriveOrder(sdOrder) {
     ttn,
     carrier,
     status: String(sdOrder.statusId || sdOrder.status || PULL_STATUS),
+    comment: sdOrder.comment || '',
     products
   };
 }
@@ -639,7 +640,7 @@ router.post('/print-warranty', async (req, res) => {
 
     for (const sdId of sdIds) {
       const result = await pool.query(
-        'SELECT last_name, first_name, phone, ttn, product_name, doc_name, qty, price, created_at FROM orders WHERE sd_id = $1 ORDER BY id ASC',
+        'SELECT last_name, first_name, phone, ttn, product_name, doc_name, qty, price, created_at, comment FROM orders WHERE sd_id = $1 ORDER BY id ASC',
         [sdId]
       );
       if (!result.rows.length) continue;
@@ -705,6 +706,15 @@ router.post('/print-warranty', async (req, res) => {
       }
       doc.moveTo(marginLeft, y).lineTo(pageWidth - marginLeft, y).stroke();
       y += 20;
+
+      // --- Коментар до замовлення зі SalesDrive (якщо є) ---
+      const orderComment = (first.comment || '').trim();
+      if (orderComment) {
+        doc.font('bold').fontSize(10).text('Коментар:', marginLeft, y, { width: tableWidth });
+        y = doc.y + 2;
+        doc.font('regular').fontSize(10).text(orderComment, marginLeft, y, { width: tableWidth });
+        y = doc.y + 14;
+      }
 
       if (isWarranty) {
         // Автопідбір розміру шрифту, щоб увесь текст гарантійного талону
