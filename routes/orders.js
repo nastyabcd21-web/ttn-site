@@ -63,38 +63,57 @@ const FONT_REGULAR = Buffer.from(assets.fontRegularBase64, 'base64');
 const FONT_BOLD = Buffer.from(assets.fontBoldBase64, 'base64');
 const ORDER_FOOTER_IMAGE = Buffer.from(assets.orderFooterImageBase64, 'base64');
 
-const WARRANTY_INTRO = 'Дякуємо, що обираєте наш магазин. У нас Ви можете придбати безліч товарів з підігрівом: Електропростирадла, електроковдри, електрогрілки різного розміру, устілки, шкарпетки з підігрівом, хімічні грілки (для ніг, рук та тіла), спальні мішки та одяг з підігрівом, і багато іншого. Щоб користуватись цим товаром із задоволенням, уважно прочитайте інструкцію.';
-const WARRANTY_INTRO2 = 'Дотримуйтесь правил користування, і ця техніка служитиме вам довго та надійно.';
+// --- Текст гарантійного талону (взято з інструкції з експлуатації, наданої користувачем) ---
+const WARRANTY_TITLE = 'ІНСТРУКЦІЯ З ЕКСПЛУАТАЦІЇ ТА БЕЗПЕКИ';
+const WARRANTY_SUBTITLE = 'Електронагрівальні вироби (електропростирадла, електрогрілки)';
+const WARRANTY_INTRO = 'Дякуємо, що обрали наш виріб! Ця інструкція створена для того, щоб ваш прилад служив довго, даруючи тепло та затишок. Будь ласка, ознайомтеся з цими рекомендаціями для комфортного та безпечного користування.';
 
-const WARRANTY_STEPS = [
-  'Розташуйте електропростирадло на матрац нижче подушки, накрийте його звичайним простирадлом та ковдрою. Переконайтеся в тому, що електропростирадло розправлене по поверхні ліжка та під час застосування не буде згинатися та утворювати зморшки.',
-  'Вставте штекер у розетку, та увімкніть на максимальний рівень температури. ВКАЗІВКА — ми наполегливо рекомендуємо увімкнути електропростирадло за 30 хвилин до сну і накрити його ковдрою, щоб уникнути втрати тепла.',
-  'Лягаючи в ліжко, перемкніть перемикач в комфортний для Вас режим роботи.',
-  'Після сну вимкніть електропростирадло і витягніть штекер з розетки.',
-  'УВАГА! — Не вмикайте електропростирадло в складеному вигляді, не складайте електропростирадло в увімкненому стані в два чи більше разів, не використовуйте як ковдру або подушку, уникайте надмірного перегинання проводів усередині електропростирадла, уникайте проколів гострими предметами та попадання води.',
-  'Заборонено використовувати людям зі зниженою чутливістю до тепла та особам, які потребують догляду, оскільки вони не можуть адекватно реагувати на перегрів.',
-  'Електричне простирадло заборонено використовувати дітям до 3-х років.',
-  'Заборонено самостійно використовувати дітям (3-8 років), за винятком випадків налаштування дорослими або навчання дитини безпечному використанню.',
-  'Особам з кардіостимуляторами попередньо проконсультуйтесь зі своїм лікарем.',
-  'Забороняється прати в пральній машині (окрім моделей з знімним перемикачем) та прасувати.',
-  'Прилад має використовуватися тільки для нагрівання тіла на ліжках упродовж сну.',
-  'Це електроприлад, тому не залишайте включений виріб без нагляду!'
+// Кожен "буліт" — або звичайний рядок, або { lead, text } з жирним вступним словом.
+const WARRANTY_SECTIONS = [
+  {
+    title: '1. ПІДГОТОВКА ДО РОБОТИ',
+    bullets: [
+      'Перевірте цілісність шнура, вилки та терморегулятора перед першим увімкненням.',
+      'Виріб призначений виключно для побутового використання всередині приміщень.',
+      'Підключайте прилад лише до справної електромережі з відповідною напругою.'
+    ]
+  },
+  {
+    title: '2. КОМФОРТНЕ ВИКОРИСТАННЯ',
+    bullets: [
+      'Використовуйте виріб у рівному, розправленому вигляді без зламів чи згортань.',
+      'Не встромляйте голки, шпильки чи інші гострі предмети.',
+      'Захищайте виріб від вологи та не використовуйте у мокрому стані.',
+      'Не накривайте важкими недихаючими матеріалами під час активної роботи.'
+    ]
+  },
+  {
+    title: '3. РЕЖИМИ ТА ДОГЛЯД',
+    bullets: [
+      { lead: 'Прогрів і сон: ', text: 'Перед сном прогрійте ліжко на вищому режимі, а для нічного відпочинку переведіть на мінімальний режим (1–2) або таймер.' },
+      { lead: 'Чистка: ', text: 'Делікатне ручне прання згідно з маркуванням (тільки після відключення від мережі та зняття пульта).' },
+      { lead: 'Зберігання: ', text: "Зберігайте в сухому місці, згортаючи м'якими вільними рулонами після охолодження." }
+    ]
+  },
+  {
+    title: '4. УМОВИ ТА ВІДПОВІДАЛЬНІСТЬ',
+    bullets: [
+      'Виробник гарантує якість за умови дотримання правил цієї інструкції.',
+      'Нічне використання дозволено виключно на мінімальних режимах. Заборонено залишати прилад без нагляду.',
+      { lead: 'Повне зняття відповідальності: ', text: "Продавець та виробник не несуть жодної відповідальності за шкоду через порушення правил (зім'ятий стан, волога, перепади напруги, самостійний ремонт). Усі ризики покладаються на споживача!" }
+    ]
+  }
 ];
 
-const WARRANTY_NOTE = "Пам'ятайте, ЕЛЕКТРОПРОСТИРАДЛО це не батарея, воно випромінює ПОМІРНЕ тепло, щоб не створювати додаткове навантаження на серцево-судинну систему людини.";
-const WARRANTY_SAFE = 'При правильному використанні воно абсолютно безпечне і нешкідливе!';
-const WARRANTY_TERMS_INTRO = 'Гарантійний термін вказано в полі з назвою товару та діє з дати придбання. В умови гарантії не входять поломки внаслідок:';
-const WARRANTY_TERMS_LIST = [
-  'використання приладу з порушенням інструкції;',
-  'використання в технічних умовах, які відрізняються від паспортних;',
-  'короткого замикання або перепадів напруги;',
-  'використання приладу не за призначенням або недбалого використання;',
-  'спроб виправити, почистити або відремонтувати самостійно.'
+const WARRANTY_TERMS_TITLE = 'ГАРАНТІЙНИЙ ТАЛОН';
+// Другий пункт закінчується жирною фразою — задано через boldTail.
+const WARRANTY_TERMS_BULLETS = [
+  "Гарантійний термін вказано в полі з назвою товару та діє з дати придбання. В умови гарантії не входять поломки внаслідок: використання приладу з порушенням інструкції; використання в технічних умовах, які відрізняються від паспортних; короткого замикання або перепадів напруги; використання приладу не за призначенням або недбалого використання; спроб випрати, почистити або відремонтувати самостійно.",
+  { lead: "У випадку браку магазин зобов'язується замінити виріб протягом 14 днів. ", boldTail: 'Товар приймається на ремонт лише в чистому вигляді!' }
 ];
-const WARRANTY_REPAIR = "У випадку браку магазин зобов'язується замінити виріб протягом 14 днів. Товар приймається на ремонт лише в чистому вигляді!";
-const WARRANTY_KEEP = 'ЗБЕРІГАЙТЕ ДАНИЙ ТАЛОН ВПРОДОВЖ ТЕРМІНУ ДІЇ ГАРАНТІЇ';
-const WARRANTY_CONTACTS_INTRO = 'Якщо виникла проблема, зверніться за номерами телефонів:';
-const WARRANTY_CONTACTS = 'Контакти: 0976802779, 0934217898, 0952481319';
+
+const WARRANTY_CONTACTS_TEXT = 'Контакти служби підтримки: 097-680-27-79, 093-421-78-98, 095-248-13-19';
+const WARRANTY_KEEP_TEXT = 'ЗБЕРІГАЙТЕ ДАНИЙ ТАЛОН ВПРОДОВЖ ТЕРМІНУ ДІЇ ГАРАНТІЇ!';
 
 function formatDateUA(d) {
   const date = d ? new Date(d) : new Date();
@@ -108,49 +127,127 @@ function randomDocNumber() {
   return String(Math.floor(100000000 + Math.random() * 900000000));
 }
 
-// --- Побудова тексту гарантійного талону блоками, з можливістю зменшити шрифт,
-// щоб гарантовано вмістити все на одну сторінку A4 (autofit). ---
-function buildWarrantyBlocks(scale) {
-  const s = (n) => Math.round(n * scale * 10) / 10;
-  const blocks = [];
-  blocks.push({ font: 'bold', size: s(14), text: 'Шановний покупець!', align: 'center', gap: s(6) });
-  blocks.push({ font: 'regular', size: s(8.5), text: WARRANTY_INTRO, align: 'left', gap: s(3) });
-  blocks.push({ font: 'regular', size: s(8.5), text: WARRANTY_INTRO2, align: 'left', gap: s(6) });
-  blocks.push({ font: 'bold', size: s(10), text: 'Інструкція з використання:', align: 'center', gap: s(3) });
-  WARRANTY_STEPS.forEach((step, idx) => {
-    blocks.push({ font: 'regular', size: s(8.5), text: `${idx + 1}. ${step}`, align: 'left', gap: s(2) });
-  });
-  blocks.push({ font: 'regular', size: s(8.5), text: WARRANTY_NOTE, align: 'left', gap: s(4) });
-  blocks.push({ font: 'bold', size: s(10), text: WARRANTY_SAFE, align: 'center', gap: s(6) });
-  blocks.push({ font: 'bold', size: s(11), text: 'Гарантійний талон', align: 'center', gap: s(4) });
-  blocks.push({ font: 'regular', size: s(8.5), text: WARRANTY_TERMS_INTRO, align: 'left', gap: s(2) });
-  WARRANTY_TERMS_LIST.forEach((line) => {
-    blocks.push({ font: 'regular', size: s(8.5), text: `•  ${line}`, align: 'left', gap: s(1) });
-  });
-  blocks.push({ font: 'regular', size: s(8.5), text: WARRANTY_REPAIR, align: 'left', gap: s(6) });
-  blocks.push({ font: 'bold', size: s(10), text: WARRANTY_KEEP, align: 'center', gap: s(6) });
-  blocks.push({ font: 'regular', size: s(8.5), text: WARRANTY_CONTACTS_INTRO, align: 'left', gap: s(3) });
-  blocks.push({ font: 'bold', size: s(10), text: WARRANTY_CONTACTS, align: 'center', gap: 0 });
-  return blocks;
-}
-
-function measureBlocks(doc, blocks, width) {
+// --- Малює (або, якщо draw=false, тільки вимірює висоту) список "булітів" в одній колонці. ---
+function layoutBullets(doc, bullets, x, y, width, size, lineGap, draw) {
+  const bulletPrefix = '•  ';
   let total = 0;
-  for (const b of blocks) {
-    doc.font(b.font).fontSize(b.size);
-    total += doc.heightOfString(b.text, { width, align: b.align }) + b.gap;
+  for (const b of bullets) {
+    doc.font('regular').fontSize(size);
+    let h;
+    if (typeof b === 'string') {
+      const text = bulletPrefix + b;
+      h = doc.heightOfString(text, { width });
+      if (draw) doc.text(text, x, y + total, { width });
+    } else if (b.boldTail) {
+      const plain = bulletPrefix + b.lead + b.boldTail;
+      h = doc.heightOfString(plain, { width });
+      if (draw) {
+        doc.font('regular').fontSize(size).text(bulletPrefix + b.lead, x, y + total, { width, continued: true });
+        doc.font('bold').fontSize(size).text(b.boldTail);
+      }
+    } else {
+      const plain = bulletPrefix + b.lead + b.text;
+      h = doc.heightOfString(plain, { width });
+      if (draw) {
+        doc.font('bold').fontSize(size).text(bulletPrefix + b.lead, x, y + total, { width, continued: true });
+        doc.font('regular').fontSize(size).text(b.text);
+      }
+    }
+    total += h + lineGap;
   }
   return total;
 }
 
-function drawBlocks(doc, blocks, x, startY, width) {
-  let y = startY;
-  for (const b of blocks) {
-    doc.font(b.font).fontSize(b.size);
-    doc.text(b.text, x, y, { width, align: b.align });
-    y = doc.y + b.gap;
+// --- Висота (або малювання) одного блоку "заголовок + буліти" (одна колонка). ---
+function layoutSection(doc, section, x, y, width, titleSize, bulletSize, titleGap, bulletGap, draw) {
+  doc.font('bold').fontSize(titleSize);
+  const titleH = doc.heightOfString(section.title, { width });
+  if (draw) doc.text(section.title, x, y, { width });
+  const bulletsH = layoutBullets(doc, section.bullets, x, y + titleH + titleGap, width, bulletSize, bulletGap, draw);
+  return titleH + titleGap + bulletsH;
+}
+
+// --- Увесь гарантійний талон (інструкція + умови гарантії), з автопідбором розміру
+// шрифту, щоб гарантовано вміститись у залишок сторінки. draw=false — лише порахувати
+// потрібну висоту; draw=true — намалювати по-справжньому на ту саму висоту. ---
+function layoutWarrantyTalon(doc, x, y, width, scale, draw) {
+  const s = (n) => Math.round(n * scale * 10) / 10;
+  const titleSize = s(13);
+  const subtitleSize = s(9.5);
+  const introSize = s(8.3);
+  const sectionTitleSize = s(9.5);
+  const bulletSize = s(8);
+  const pad = s(7);
+  const colGap = s(12);
+  const boxGap = s(7);
+  const titleGap = s(3);
+  const bulletGap = s(2);
+
+  let curY = y;
+
+  doc.font('bold').fontSize(titleSize);
+  const mainTitleH = doc.heightOfString(WARRANTY_TITLE, { width, align: 'center' });
+  if (draw) doc.text(WARRANTY_TITLE, x, curY, { width, align: 'center' });
+  curY += mainTitleH + s(2);
+
+  doc.font('bold').fontSize(subtitleSize);
+  const subtitleH = doc.heightOfString(WARRANTY_SUBTITLE, { width, align: 'center' });
+  if (draw) doc.text(WARRANTY_SUBTITLE, x, curY, { width, align: 'center' });
+  curY += subtitleH + s(5);
+
+  // --- Бокс з вітальним текстом ---
+  doc.font('regular').fontSize(introSize);
+  const introH = doc.heightOfString(WARRANTY_INTRO, { width: width - pad * 2 });
+  const introBoxH = introH + pad * 2;
+  if (draw) {
+    doc.rect(x, curY, width, introBoxH).stroke();
+    doc.text(WARRANTY_INTRO, x + pad, curY + pad, { width: width - pad * 2 });
   }
-  return y;
+  curY += introBoxH + boxGap;
+
+  // --- Два ряди по дві секції (бокси однакової висоти в межах ряду) ---
+  const boxWidth = (width - colGap) / 2;
+  const colWidth = boxWidth - pad * 2;
+  const rows = [[WARRANTY_SECTIONS[0], WARRANTY_SECTIONS[1]], [WARRANTY_SECTIONS[2], WARRANTY_SECTIONS[3]]];
+  for (const [left, right] of rows) {
+    const hLeft = layoutSection(doc, left, 0, 0, colWidth, sectionTitleSize, bulletSize, titleGap, bulletGap, false);
+    const hRight = layoutSection(doc, right, 0, 0, colWidth, sectionTitleSize, bulletSize, titleGap, bulletGap, false);
+    const rowBoxH = Math.max(hLeft, hRight) + pad * 2;
+    if (draw) {
+      doc.rect(x, curY, boxWidth, rowBoxH).stroke();
+      doc.rect(x + boxWidth + colGap, curY, boxWidth, rowBoxH).stroke();
+      layoutSection(doc, left, x + pad, curY + pad, colWidth, sectionTitleSize, bulletSize, titleGap, bulletGap, true);
+      layoutSection(doc, right, x + boxWidth + colGap + pad, curY + pad, colWidth, sectionTitleSize, bulletSize, titleGap, bulletGap, true);
+    }
+    curY += rowBoxH + boxGap;
+  }
+
+  // --- Бокс "Гарантійний талон" ---
+  doc.font('bold').fontSize(s(11));
+  const termsTitleH = doc.heightOfString(WARRANTY_TERMS_TITLE, { width: width - pad * 2, align: 'center' });
+  const termsBulletsH = layoutBullets(doc, WARRANTY_TERMS_BULLETS, 0, 0, width - pad * 2, bulletSize, bulletGap, false);
+  const termsBoxH = termsTitleH + titleGap + termsBulletsH + pad * 2;
+  if (draw) {
+    doc.rect(x, curY, width, termsBoxH).stroke();
+    doc.font('bold').fontSize(s(11)).text(WARRANTY_TERMS_TITLE, x + pad, curY + pad, { width: width - pad * 2, align: 'center' });
+    layoutBullets(doc, WARRANTY_TERMS_BULLETS, x + pad, curY + pad + termsTitleH + titleGap, width - pad * 2, bulletSize, bulletGap, true);
+  }
+  curY += termsBoxH + boxGap;
+
+  // --- Нижній ряд: контакти (зліва) + "зберігайте талон" (справа) ---
+  doc.font('bold').fontSize(s(9));
+  const contactsH = doc.heightOfString(WARRANTY_CONTACTS_TEXT, { width: colWidth });
+  const keepH = doc.heightOfString(WARRANTY_KEEP_TEXT, { width: colWidth, align: 'center' });
+  const bottomBoxH = Math.max(contactsH, keepH) + pad * 2;
+  if (draw) {
+    doc.rect(x, curY, boxWidth, bottomBoxH).stroke();
+    doc.rect(x + boxWidth + colGap, curY, boxWidth, bottomBoxH).stroke();
+    doc.font('bold').fontSize(s(9)).text(WARRANTY_CONTACTS_TEXT, x + pad, curY + pad, { width: colWidth });
+    doc.font('bold').fontSize(s(9)).text(WARRANTY_KEEP_TEXT, x + boxWidth + colGap + pad, curY + pad, { width: colWidth, align: 'center' });
+  }
+  curY += bottomBoxH;
+
+  return curY - y;
 }
 
 // --- Список товарів, для яких вручну позначено "друкувати гарантію" ---
@@ -838,18 +935,16 @@ router.post('/print-warranty', async (req, res) => {
       }
 
       if (isWarranty) {
-        // Автопідбір розміру шрифту, щоб увесь текст гарантійного талону
+        // Автопідбір розміру шрифту, щоб увесь гарантійний талон
         // гарантовано вмістився на залишок ЦІЄЇ сторінки (без переносу на другу).
         const availableHeight = doc.page.height - doc.page.margins.bottom - y;
         let scale = 1;
-        let blocks = buildWarrantyBlocks(scale);
-        let neededHeight = measureBlocks(doc, blocks, tableWidth);
+        let neededHeight = layoutWarrantyTalon(doc, marginLeft, y, tableWidth, scale, false);
         while (neededHeight > availableHeight && scale > 0.5) {
           scale = Math.round((scale - 0.05) * 100) / 100;
-          blocks = buildWarrantyBlocks(scale);
-          neededHeight = measureBlocks(doc, blocks, tableWidth);
+          neededHeight = layoutWarrantyTalon(doc, marginLeft, y, tableWidth, scale, false);
         }
-        drawBlocks(doc, blocks, marginLeft, y, tableWidth);
+        layoutWarrantyTalon(doc, marginLeft, y, tableWidth, scale, true);
       } else {
         try {
           doc.image(ORDER_FOOTER_IMAGE, marginLeft, y, { width: tableWidth });
