@@ -5,7 +5,7 @@ services:
     name: ttn-fulfillment-site
     env: node
     plan: free
-    buildCommand: npm install
+    buildCommand: npm install && npx playwright install chromium
     startCommand: npm start
     envVars:
       - key: DATABASE_URL
