@@ -8,7 +8,42 @@
 // Cookies кешуються в пам'яті на COOKIE_TTL_MS, щоб не заходити на prom.ua
 // заново при кожному запиті етикетки.
 
+const path = require('path');
+const { execFile } = require('child_process');
 const { chromium } = require('playwright');
+
+// Якщо браузер Chromium не був встановлений під час збірки на Render,
+// завантажуємо його самі при першому запиті (один раз, потім він лишається на диску).
+let installPromise = null;
+function installChromium() {
+  if (!installPromise) {
+    installPromise = new Promise((resolve, reject) => {
+      const cli = path.join(path.dirname(require.resolve('playwright/package.json')), 'cli.js');
+      execFile(process.execPath, [cli, 'install', 'chromium'], { timeout: 5 * 60 * 1000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+        if (err) {
+          installPromise = null; // дозволяємо повторну спробу пізніше
+          return reject(new Error('Не вдалося завантажити браузер: ' + (stderr || err.message).toString().slice(-300)));
+        }
+        resolve();
+      });
+    });
+  }
+  return installPromise;
+}
+
+async function launchBrowser() {
+  const opts = {
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+  };
+  try {
+    return await chromium.launch(opts);
+  } catch (e) {
+    if (!/Executable doesn't exist|playwright install/i.test(String(e.message))) throw e;
+    await installChromium();
+    return chromium.launch(opts);
+  }
+}
 
 let cachedCookies = null;
 let cachedAt = 0;
@@ -21,10 +56,7 @@ async function loginToProm() {
     throw new Error('Не встановлено PROM_LOGIN / PROM_PASSWORD на сервері (Render → Environment).');
   }
 
-  const browser = await chromium.launch({
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
-  });
+  const browser = await launchBrowser();
   try {
     const context = await browser.newContext();
     const page = await context.newPage();
