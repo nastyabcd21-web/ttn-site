@@ -17,6 +17,13 @@ function promStickerUrl(promOrderId, ttn) {
   return `https://my.prom.ua/remote/delivery/rozetka_delivery/get_sticker?order_id=${encodeURIComponent(promOrderId)}&declaration_id=${encodeURIComponent(ttn)}`;
 }
 
+// Укрпошта, ТТН створена на Prom.ua: ярлик віддає my.prom.ua як shipments.pdf.
+// delivery_option_id — спосіб доставки "Укрпошта" в магазині на prom (можна змінити змінною PROM_UKRPOSHTA_OPTION_ID на Render).
+function promUkrposhtaUrl(promOrderId) {
+  const optionId = process.env.PROM_UKRPOSHTA_OPTION_ID || '11371802';
+  return `https://my.prom.ua/cabinet/delivery/print_shipment_pdf?order_id=${encodeURIComponent(promOrderId)}&delivery_option_id=${encodeURIComponent(optionId)}`;
+}
+
 function fetchPromSticker(promOrderId, ttn, cookies) {
   return fetch(promStickerUrl(promOrderId, ttn), {
     headers: {
@@ -402,7 +409,24 @@ router.post('/refresh-names', async (req, res) => {
         const dbRows = await pool.query('SELECT id FROM orders WHERE sd_id = $1 ORDER BY id ASC', [sdId]);
         // Оновлюємо, тільки якщо кількість товарів співпадає — інакше ризикуємо
         // переплутати, який рядок якому товару відповідає.
-        if (dbRows.rows.length !== mapped.products.length) { skippedMismatch++; continue; }
+        if (dbRows.rows.length !== mapped.products.length) {
+          // Кількість рядків змінилась (наприклад, комплект розгорнувся в окремі товари) —
+          // перестворюємо рядки замовлення, зберігаючи його статус і дату.
+          const first = await pool.query('SELECT status, created_at FROM orders WHERE sd_id = $1 ORDER BY id ASC LIMIT 1', [sdId]);
+          const keepStatus = first.rows[0] ? first.rows[0].status : mapped.status;
+          const keepCreated = first.rows[0] ? first.rows[0].created_at : new Date();
+          await pool.query('DELETE FROM orders WHERE sd_id = $1', [sdId]);
+          for (const item of mapped.products) {
+            await pool.query(
+              `INSERT INTO orders (sd_id, last_name, first_name, phone, product_name, doc_name, qty, price, ttn, carrier, status, comment, prom_order_id, created_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+              [mapped.sdId, mapped.lastName, mapped.firstName, mapped.phone, item.name, item.docName, item.qty, item.price, mapped.ttn, mapped.carrier, keepStatus, mapped.comment, mapped.promOrderId, keepCreated]
+            );
+            updatedRows++;
+          }
+          updatedOrders++;
+          continue;
+        }
 
         for (let i = 0; i < dbRows.rows.length; i++) {
           await pool.query(
@@ -431,15 +455,30 @@ function mapSalesDriveOrder(sdOrder) {
   if (!Array.isArray(rawProducts) && typeof rawProducts === 'object') {
     rawProducts = Object.keys(rawProducts).map((k) => rawProducts[k]);
   }
-  const products = rawProducts.map((p) => ({
-    // Звичайна назва товару — НІКОЛИ не підставляємо сюди "Назву для документів",
-    // навіть якщо основна назва порожня (щоб список "Гарантія по товарах" не змішувався).
-    name: p.text || p.name || p.title || '',
-    // "Назва для документів" у SalesDrive — саме її показуємо в гарантійних талонах.
-    docName: p.documentName || p.text || p.name || p.title || '',
-    qty: p.amount || p.qty || 1,
-    price: p.price || p.costPerItem || 0
-  }));
+  const products = [];
+  for (const p of rawProducts) {
+    const baseName = p.text || p.name || p.title || '';
+    const baseDocName = p.documentName || p.text || p.name || p.title || '';
+    const amount = Number(p.amount || p.qty || 1) || 1;
+    const price = Number(p.price || p.costPerItem || 0) || 0;
+    const parts = Array.isArray(p.complect) ? p.complect.filter((c) => c && (c.name || c.text)) : [];
+    if (p.isComplect && parts.length) {
+      // Комплект: замість назви комплекту друкуємо окремими рядками товари з комплекту.
+      // Ціна комплекту лишається на першому рядку (сума замовлення не змінюється), решта — 0.
+      parts.forEach((c, idx) => {
+        const compName = c.name || c.text || '';
+        const qty = amount * (Number(c.count) || 1);
+        products.push({
+          name: compName,
+          docName: compName,
+          qty,
+          price: idx === 0 ? (price * amount) / qty : 0
+        });
+      });
+    } else {
+      products.push({ name: baseName, docName: baseDocName, qty: amount, price });
+    }
+  }
   if (!products.length) products.push({ name: '', docName: '', qty: 1, price: 0 });
 
   const contact = sdOrder.primaryContact || {};
@@ -453,7 +492,11 @@ function mapSalesDriveOrder(sdOrder) {
   const ttn = delivery.trackingNumber || sdOrder.ttn || '';
   // Внутрішній ID замовлення на самому Prom.ua — потрібен для друку етикетки
   // Rozetka Delivery через my.prom.ua (тільки для замовлень з Prom, TTN виду PRM-...).
-  const promOrderId = delivery.orderExternalId || '';
+  let promOrderId = delivery.orderExternalId || '';
+  // Укрпошта з Prom: ID замовлення на prom лежить у externalId замовлення (джерело utmCampaign = "Prom").
+  if (!promOrderId && carrier === 'ukrposhta' && String(sdOrder.utmCampaign || '').toLowerCase() === 'prom') {
+    promOrderId = String(sdOrder.externalId || '');
+  }
 
   return {
     sdId: String(sdOrder.id || sdOrder.orderId),
@@ -585,6 +628,7 @@ router.post('/print-ttn', async (req, res) => {
     const rozetkaTtns = [];
     const promOrdersToFetch = []; // { sdId, ttn, promOrderId } — етикетка через логін на prom.ua
     const manualCarrierOrders = [];
+    const promLinks = []; // кнопки-посилання на ярлики з prom.ua (Rozetka Delivery PRM- та Укрпошта)
     for (const sdId of sdIds) {
       const row = rowsBySdId[sdId];
       if (!row) continue;
@@ -600,6 +644,8 @@ router.post('/print-ttn', async (req, res) => {
         } else {
           manualCarrierOrders.push(`${row.sd_id} (Rozetka Delivery через Prom.ua — невідомий ID замовлення на prom.ua, оновіть список)`);
         }
+      } else if (row.carrier === 'ukrposhta' && row.prom_order_id && ttnTrimmed) {
+        promLinks.push({ sdId: row.sd_id, ttn: ttnTrimmed, url: promUkrposhtaUrl(row.prom_order_id) });
       } else if (AUTO_PRINT_CARRIERS.indexOf(row.carrier) === -1) {
         const label = CARRIER_LABELS[row.carrier] || row.carrier || 'невідомий перевізник';
         manualCarrierOrders.push(`${row.sd_id} (${label})`);
@@ -610,7 +656,7 @@ router.post('/print-ttn', async (req, res) => {
       }
     }
 
-    if (!npTtns.length && !rozetkaTtns.length && !promOrdersToFetch.length && !manualCarrierOrders.length) {
+    if (!npTtns.length && !rozetkaTtns.length && !promOrdersToFetch.length && !promLinks.length && !manualCarrierOrders.length) {
       return res.status(400).json({ error: 'У вибраних замовленнях немає номерів ТТН.' });
     }
 
@@ -657,7 +703,6 @@ router.post('/print-ttn', async (req, res) => {
     // Етикетки з Prom.ua: сервер входить на prom.ua і качає PDF. Що не вдалось — віддаємо посиланнями.
     let promBuffer = null;
     let promError = '';
-    const promLinks = [];
     if (promOrdersToFetch.length) {
       const promBuffers = [];
       let cookies = null;
