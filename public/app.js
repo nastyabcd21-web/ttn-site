@@ -213,12 +213,44 @@ async function printSelectedTtn() {
       const url = URL.createObjectURL(blob);
       window.open(url, '_blank');
     }
+    showPromLinks(res.promLinks || []);
     if (res.manualMessage) alert(res.manualMessage);
   } catch (err) {
     alert('Помилка: ' + err.message);
   } finally {
     btn.disabled = false; btn.textContent = '🖨️ Друкувати ТТН (вибрані)';
   }
+}
+
+// Етикетки Rozetka Delivery з Prom.ua (PRM-...): кожна відкривається на my.prom.ua
+// у вашому браузері (де ви вже увійшли в prom.ua) і одразу завантажується як PDF.
+function showPromLinks(links) {
+  let box = document.getElementById('promLinksBox');
+  if (!links.length) { if (box) box.remove(); return; }
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'promLinksBox';
+    box.style.cssText = 'background:#fff8e1;border:1px solid #f0c36d;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:13px;';
+    const stats = document.getElementById('orderStats');
+    stats.parentNode.insertBefore(box, stats);
+  }
+  box.innerHTML = '';
+  const title = document.createElement('div');
+  title.style.cssText = 'font-weight:bold;margin-bottom:6px;';
+  title.textContent = 'Етикетки Rozetka Delivery з Prom.ua — натискайте по одній (потрібно бути увійденою в prom.ua):';
+  box.appendChild(title);
+  links.forEach((l) => {
+    const a = document.createElement('a');
+    a.href = l.url; a.target = '_blank'; a.rel = 'noopener';
+    a.textContent = '⬇️ ' + l.ttn + ' (замовлення ' + l.sdId + ')';
+    a.style.cssText = 'display:inline-block;margin:3px 8px 3px 0;padding:6px 10px;background:#fff;border:1px solid #ccc;border-radius:4px;color:#1a73e8;text-decoration:none;';
+    box.appendChild(a);
+  });
+  const close = document.createElement('button');
+  close.textContent = 'Закрити';
+  close.style.cssText = 'display:block;margin-top:6px;padding:4px 10px;cursor:pointer;';
+  close.onclick = () => box.remove();
+  box.appendChild(close);
 }
 
 async function printWarranty() {
