@@ -5,15 +5,30 @@ const { PDFDocument: PDFLibDocument } = require('pdf-lib');
 const pool = require('../db/pool');
 const { authMiddleware } = require('./auth');
 const assets = require('../assets');
+const { getPromCookies } = require('../promAuth');
 
 const router = express.Router();
 
 // ===== Етикетки Rozetka Delivery для замовлень з Prom.ua (ТТН виду PRM-...) =====
-// Сервер НЕ входить у prom.ua. Замість цього ми даємо посилання на етикетку на my.prom.ua —
-// вони відкриваються у браузері користувача, де він уже увійшов у prom.ua (так само працює
-// і кнопка друку в SalesDrive).
+// Внутрішній ендпоінт my.prom.ua працює лише з cookie-сесією користувача, тому сервер
+// заходить на prom.ua під логіном/паролем (promAuth.js) і качає PDF. Якщо не вдалось —
+// віддаємо запасні посилання, які відкриваються в браузері користувача.
 function promStickerUrl(promOrderId, ttn) {
   return `https://my.prom.ua/remote/delivery/rozetka_delivery/get_sticker?order_id=${encodeURIComponent(promOrderId)}&declaration_id=${encodeURIComponent(ttn)}`;
+}
+
+function fetchPromSticker(promOrderId, ttn, cookies) {
+  return fetch(promStickerUrl(promOrderId, ttn), {
+    headers: {
+      Cookie: cookies,
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+    }
+  });
+}
+
+function isPdfResponse(response) {
+  const contentType = response.headers.get('content-type') || '';
+  return response.ok && (contentType.includes('pdf') || contentType.includes('octet-stream'));
 }
 
 // ======================= ШРИФТИ ТА ТЕКСТИ ДЛЯ ГАРАНТІЙНИХ ТАЛОНІВ =======================
@@ -639,15 +654,47 @@ router.post('/print-ttn', async (req, res) => {
       if (rozetkaErrors.length) rozetkaError = rozetkaErrors.join(' | ');
     }
 
-    // Етикетки з Prom.ua — посилання (відкриваються в браузері користувача, де є вхід у prom.ua).
-    const promLinks = promOrdersToFetch.map((item) => ({
-      sdId: item.sdId,
-      ttn: item.ttn,
-      url: promStickerUrl(item.promOrderId, item.ttn)
-    }));
+    // Етикетки з Prom.ua: сервер входить на prom.ua і качає PDF. Що не вдалось — віддаємо посиланнями.
+    let promBuffer = null;
+    let promError = '';
+    const promLinks = [];
+    if (promOrdersToFetch.length) {
+      const promBuffers = [];
+      let cookies = null;
+      try {
+        cookies = await getPromCookies();
+      } catch (e) {
+        promError = 'Не вдалося увійти на prom.ua: ' + e.message;
+      }
+      for (const item of promOrdersToFetch) {
+        let buf = null;
+        if (cookies) {
+          try {
+            let response = await fetchPromSticker(item.promOrderId, item.ttn, cookies);
+            if (!isPdfResponse(response)) {
+              cookies = await getPromCookies(true);
+              response = await fetchPromSticker(item.promOrderId, item.ttn, cookies);
+            }
+            if (isPdfResponse(response)) buf = await response.buffer();
+          } catch (e) {
+            promError = promError || ('Помилка отримання етикетки з prom.ua: ' + e.message);
+          }
+        }
+        if (buf) {
+          promBuffers.push(buf);
+        } else {
+          promLinks.push({ sdId: item.sdId, ttn: item.ttn, url: promStickerUrl(item.promOrderId, item.ttn) });
+        }
+      }
+      if (promBuffers.length === 1) promBuffer = promBuffers[0];
+      else if (promBuffers.length > 1) promBuffer = await mergePdfBuffers(promBuffers);
+      if (promLinks.length && !promError) {
+        promError = 'prom.ua не віддав етикетку для: ' + promLinks.map((l) => l.ttn).join(', ');
+      }
+    }
 
     let pdfBase64 = '';
-    const partsToMerge = [npBuffer, rozetkaBuffer].filter(Boolean);
+    const partsToMerge = [npBuffer, rozetkaBuffer, promBuffer].filter(Boolean);
     if (partsToMerge.length === 1) {
       pdfBase64 = partsToMerge[0].toString('base64');
     } else if (partsToMerge.length > 1) {
@@ -661,6 +708,9 @@ router.post('/print-ttn', async (req, res) => {
     }
     if (rozetkaError) {
       messages.push(`ПОМИЛКА Rozetka Delivery: ` + rozetkaError);
+    }
+    if (promError) {
+      messages.push('ПОМИЛКА Rozetka Delivery (Prom.ua): ' + promError + ' Запасні посилання — у жовтому блоці над таблицею.');
     }
 
     res.json({ pdfBase64, promLinks, manualMessage: messages.join(' ') });
