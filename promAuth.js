@@ -54,15 +54,18 @@ const COOKIE_TTL_MS = 20 * 60 * 1000; // 20 хвилин
 async function describePage(page) {
   try {
     const info = await page.evaluate(() => {
-      const inputs = Array.from(document.querySelectorAll('input, button')).slice(0, 15).map((el) => {
-        const r = el.getBoundingClientRect();
-        const vis = r.width > 0 && r.height > 0;
-        return `${el.tagName.toLowerCase()}[type=${el.type || ''},name=${el.name || ''},id=${el.id || ''},ph=${el.placeholder || ''},vis=${vis}]`;
-      });
-      const text = (document.body && document.body.innerText || '').replace(/\s+/g, ' ').slice(0, 250);
-      return { title: document.title, inputs, text };
+      const vis = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+      const inputs = Array.from(document.querySelectorAll('input')).filter(vis).slice(0, 10)
+        .map((el) => `input[type=${el.type},name=${el.name},id=${el.id},ph=${el.placeholder}]`);
+      const buttons = Array.from(document.querySelectorAll('button, [role=button]')).filter(vis).slice(0, 15)
+        .map((el) => (el.innerText || el.getAttribute('aria-label') || '').trim().slice(0, 30)).filter(Boolean);
+      const links = Array.from(document.querySelectorAll('a[href]')).filter((a) => /login|signin|sign-in|auth|cabinet|vhid/i.test(a.href + ' ' + a.innerText))
+        .slice(0, 8).map((a) => `${(a.innerText || '').trim().slice(0, 25)} -> ${a.href.slice(0, 80)}`);
+      const frames = document.querySelectorAll('iframe').length;
+      const text = (document.body && document.body.innerText || '').replace(/\s+/g, ' ').slice(0, 200);
+      return { title: document.title, inputs, buttons, links, frames, text };
     });
-    return `URL: ${page.url()} | Заголовок: ${info.title} | Елементи: ${info.inputs.join(' ')} | Текст: ${info.text}`;
+    return `URL: ${page.url()} | Заголовок: ${info.title} | Поля: ${info.inputs.join(' ') || 'немає'} | Кнопки: ${info.buttons.join(', ') || 'немає'} | Посилання: ${info.links.join(' ; ') || 'немає'} | iframe: ${info.frames} | Текст: ${info.text}`;
   } catch (e) {
     return `URL: ${page.url()} (не вдалося прочитати сторінку: ${e.message})`;
   }
@@ -85,9 +88,40 @@ const LOGIN_SELECTORS = [
   '#login', '#email', 'input[data-qaid*="login"]', 'input[data-qaid*="email"]',
   'input[type="text"]:not([type="hidden"])'
 ];
+const LOGIN_SELECTORS_STRICT = LOGIN_SELECTORS.filter((x) => !x.startsWith('input[type="text"]'));
 const PASS_SELECTORS = [
   'input[type="password"]', 'input[name="password"]', '#password', 'input[data-qaid*="password"]'
 ];
+
+const LOGIN_URLS = [
+  'https://my.prom.ua/cabinet/',
+  'https://prom.ua/cabinet/login',
+  'https://my.prom.ua/login',
+  'https://prom.ua/ua/login'
+];
+
+// Відкриває сторінку входу й повертає перше видиме поле логіну (або null).
+// Якщо форми одразу немає — натискає кнопку "Увійти/Вхід" (форма може бути у вікні).
+async function openLoginForm(page) {
+  for (const url of LOGIN_URLS) {
+    try {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    } catch (e) { continue; }
+    await page.waitForSelector('input[type="password"], input[type="email"], input[type="tel"]', { state: 'visible', timeout: 12000 }).catch(() => {});
+    await page.waitForTimeout(1000);
+    let el = await findVisible(page, LOGIN_SELECTORS_STRICT);
+    if (el) return el;
+    // форма може відкриватись кнопкою
+    const btn = page.locator('button:has-text("Увійти"), a:has-text("Увійти"), button:has-text("Вхід"), a:has-text("Вхід"), button:has-text("Увійти в кабінет")').first();
+    if (await btn.count()) {
+      await btn.click({ timeout: 5000 }).catch(() => {});
+      await page.waitForSelector('input[type="password"], input[type="email"], input[type="tel"]', { state: 'visible', timeout: 10000 }).catch(() => {});
+      el = await findVisible(page, LOGIN_SELECTORS_STRICT);
+      if (el) return el;
+    }
+  }
+  return null;
+}
 
 async function loginToProm() {
   const login = process.env.PROM_LOGIN;
@@ -104,13 +138,7 @@ async function loginToProm() {
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
     });
     const page = await context.newPage();
-    await page.goto('https://my.prom.ua/login', { waitUntil: 'domcontentloaded', timeout: 45000 });
-
-    // Сторінка входу може домальовуватись скриптами — чекаємо, поки з'явиться хоч одне поле.
-    await page.waitForSelector('input', { state: 'visible', timeout: 20000 }).catch(() => {});
-    await page.waitForTimeout(1500);
-
-    const loginEl = await findVisible(page, LOGIN_SELECTORS);
+    const loginEl = await openLoginForm(page);
     if (!loginEl) {
       throw new Error('Не знайдено поле логіну на сторінці входу prom.ua. ' + (await describePage(page)));
     }
