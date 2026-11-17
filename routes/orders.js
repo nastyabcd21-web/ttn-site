@@ -5,55 +5,16 @@ const { PDFDocument: PDFLibDocument } = require('pdf-lib');
 const pool = require('../db/pool');
 const { authMiddleware } = require('./auth');
 const assets = require('../assets');
-const { getPromCookies } = require('../promAuth');
 
 const router = express.Router();
 
-// ===== Друк етикетки Rozetka Delivery для замовлень, створених на Prom.ua (TTN виду PRM-...) =====
-// SalesDrive для таких замовлень друкує етикетку через внутрішній (недокументований)
-// ендпоінт my.prom.ua, який працює лише з cookie-сесією авторизованого користувача,
-// а не з API-токеном. Тому тут ми самі "заходимо" на prom.ua під логіном/паролем
-// (через promAuth.js) і використовуємо отримані cookies для запиту етикетки.
-async function fetchPromSticker(orderId, declarationId, cookies) {
-  const url = `https://my.prom.ua/remote/delivery/rozetka_delivery/get_sticker?order_id=${encodeURIComponent(orderId)}&declaration_id=${encodeURIComponent(declarationId)}`;
-  return fetch(url, { headers: { Cookie: cookies } });
+// ===== Етикетки Rozetka Delivery для замовлень з Prom.ua (ТТН виду PRM-...) =====
+// Сервер НЕ входить у prom.ua. Замість цього ми даємо посилання на етикетку на my.prom.ua —
+// вони відкриваються у браузері користувача, де він уже увійшов у prom.ua (так само працює
+// і кнопка друку в SalesDrive).
+function promStickerUrl(promOrderId, ttn) {
+  return `https://my.prom.ua/remote/delivery/rozetka_delivery/get_sticker?order_id=${encodeURIComponent(promOrderId)}&declaration_id=${encodeURIComponent(ttn)}`;
 }
-
-function isPdfResponse(response) {
-  const contentType = response.headers.get('content-type') || '';
-  return contentType.includes('pdf') || contentType.includes('octet-stream');
-}
-
-router.get('/rozetka-prom-sticker', async (req, res) => {
-  const orderId = req.query.order_id;
-  const declarationId = req.query.declaration_id;
-  if (!orderId || !declarationId) {
-    return res.status(400).json({ error: 'Треба передати order_id та declaration_id.' });
-  }
-  try {
-    let cookies = await getPromCookies();
-    let response = await fetchPromSticker(orderId, declarationId, cookies);
-
-    // Якщо з кешованими cookies не вийшло (сесія застаріла) — заходимо на prom.ua ще раз.
-    if (!response.ok || !isPdfResponse(response)) {
-      cookies = await getPromCookies(true);
-      response = await fetchPromSticker(orderId, declarationId, cookies);
-    }
-
-    if (!response.ok || !isPdfResponse(response)) {
-      const text = await response.text().catch(() => '');
-      console.error('Не вдалося отримати етикетку з prom.ua:', response.status, text.substring(0, 300));
-      return res.status(502).json({ error: 'Prom.ua не повернув етикетку (можливо, змінилась структура сайту або сесія не пройшла).' });
-    }
-
-    const buf = await response.buffer();
-    res.set('Content-Type', 'application/pdf');
-    res.send(buf);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Помилка при отриманні етикетки з prom.ua: ' + err.message });
-  }
-});
 
 // ======================= ШРИФТИ ТА ТЕКСТИ ДЛЯ ГАРАНТІЙНИХ ТАЛОНІВ =======================
 // Шрифти (DejaVu Sans, підтримують кирилицю) та картинка зберігаються в assets.js
@@ -678,49 +639,15 @@ router.post('/print-ttn', async (req, res) => {
       if (rozetkaErrors.length) rozetkaError = rozetkaErrors.join(' | ');
     }
 
-    let promBuffer = null;
-    let promError = '';
-    if (promOrdersToFetch.length) {
-      const promBuffers = [];
-      const promErrors = [];
-      let cookies = null;
-      try {
-        cookies = await getPromCookies();
-      } catch (e) {
-        promError = 'Не вдалося увійти на prom.ua: ' + e.message;
-      }
-      if (cookies) {
-        for (const item of promOrdersToFetch) {
-          try {
-            let response = await fetchPromSticker(item.promOrderId, item.ttn, cookies);
-            if (!response.ok || !isPdfResponse(response)) {
-              cookies = await getPromCookies(true);
-              response = await fetchPromSticker(item.promOrderId, item.ttn, cookies);
-            }
-            if (!response.ok || !isPdfResponse(response)) {
-              promErrors.push(`${item.sdId} (ТТН ${item.ttn})`);
-              continue;
-            }
-            promBuffers.push(await response.buffer());
-          } catch (e) {
-            promErrors.push(`${item.sdId} (ТТН ${item.ttn}: ${e.message})`);
-          }
-        }
-      } else {
-        promErrors.push(...promOrdersToFetch.map((item) => `${item.sdId} (ТТН ${item.ttn})`));
-      }
-      if (promBuffers.length === 1) {
-        promBuffer = promBuffers[0];
-      } else if (promBuffers.length > 1) {
-        promBuffer = await mergePdfBuffers(promBuffers);
-      }
-      if (promErrors.length) {
-        promError = (promError ? promError + ' | ' : '') + 'Не вдалося отримати етикетку через prom.ua для: ' + promErrors.join(', ');
-      }
-    }
+    // Етикетки з Prom.ua — посилання (відкриваються в браузері користувача, де є вхід у prom.ua).
+    const promLinks = promOrdersToFetch.map((item) => ({
+      sdId: item.sdId,
+      ttn: item.ttn,
+      url: promStickerUrl(item.promOrderId, item.ttn)
+    }));
 
     let pdfBase64 = '';
-    const partsToMerge = [npBuffer, rozetkaBuffer, promBuffer].filter(Boolean);
+    const partsToMerge = [npBuffer, rozetkaBuffer].filter(Boolean);
     if (partsToMerge.length === 1) {
       pdfBase64 = partsToMerge[0].toString('base64');
     } else if (partsToMerge.length > 1) {
@@ -735,11 +662,8 @@ router.post('/print-ttn', async (req, res) => {
     if (rozetkaError) {
       messages.push(`ПОМИЛКА Rozetka Delivery: ` + rozetkaError);
     }
-    if (promError) {
-      messages.push(`ПОМИЛКА Rozetka Delivery (Prom.ua): ` + promError);
-    }
 
-    res.json({ pdfBase64, manualMessage: messages.join(' ') });
+    res.json({ pdfBase64, promLinks, manualMessage: messages.join(' ') });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Помилка сервера при друку ТТН: ' + err.message });
