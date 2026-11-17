@@ -661,10 +661,15 @@ router.post('/print-ttn', async (req, res) => {
     if (promOrdersToFetch.length) {
       const promBuffers = [];
       let cookies = null;
-      try {
-        cookies = await getPromCookies();
-      } catch (e) {
-        promError = 'Не вдалося увійти на prom.ua: ' + e.message;
+      // Автовхід на prom.ua вимкнено за замовчуванням: prom.ua блокує вхід з сервера
+      // (перевірка "ви не робот"). Лишаємо лише посилання. Увімкнути: PROM_AUTO_LOGIN=1.
+      const autoLogin = process.env.PROM_AUTO_LOGIN === '1';
+      if (autoLogin) {
+        try {
+          cookies = await getPromCookies();
+        } catch (e) {
+          promError = 'Не вдалося увійти на prom.ua: ' + e.message;
+        }
       }
       for (const item of promOrdersToFetch) {
         let buf = null;
@@ -688,7 +693,7 @@ router.post('/print-ttn', async (req, res) => {
       }
       if (promBuffers.length === 1) promBuffer = promBuffers[0];
       else if (promBuffers.length > 1) promBuffer = await mergePdfBuffers(promBuffers);
-      if (promLinks.length && !promError) {
+      if (promLinks.length && !promError && autoLogin) {
         promError = 'prom.ua не віддав етикетку для: ' + promLinks.map((l) => l.ttn).join(', ');
       }
     }
