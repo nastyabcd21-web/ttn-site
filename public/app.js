@@ -237,7 +237,7 @@ function showPromLinks(links) {
   box.innerHTML = '';
   const title = document.createElement('div');
   title.style.cssText = 'font-weight:bold;margin-bottom:6px;';
-  title.textContent = 'Етикетки Prom.ua, які не вдалося додати до PDF — відкрийте по одній (потрібно бути увійденою в prom.ua):';
+  title.textContent = 'Етикетки Rozetka Delivery з Prom.ua — натискайте по одній, кожна завантажиться PDF-файлом (потрібно бути увійденою в prom.ua):';
   box.appendChild(title);
   links.forEach((l) => {
     const a = document.createElement('a');
